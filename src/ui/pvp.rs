@@ -1,0 +1,98 @@
+use std::{collections::HashSet, rc::Rc};
+use gtk::{glib, prelude::*};
+use crate::{combat::*, config::*, data::{classes::*}, hero::*, model::*, persistence::*, utils::*};
+use super::{Ui, pad};
+use crate::model::{K::{Absorb, Buff, Dmg, Dot, Guard, Heal, Kick, Leech, Stun, Util}, R::{Free, Mana, Stam}, Role::{Healer, Melee, Ranged, Tank}, Wt::{Axe, Bow, Crossbow, Dagger, Fist, Gun, Mace, Polearm, Staff, Sword, Wand, Warglaive}};
+
+impl Ui {
+        pub(crate) fn new_opponents(self: &Rc<Self>) {
+            let lvl = self.active.get()
+                .and_then(|a| self.save.borrow().heroes.get(a).map(|h| h.level)).unwrap_or(1);
+            let faction = PVP_FACTIONS[(self.pvp_faction.selected() as usize).min(PVP_FACTIONS.len() - 1)];
+            // Keep generating until the selected faction has a full list.
+            let mut v: Vec<Fighter> = Vec::with_capacity(PVP_SHOWN);
+            while v.len() < PVP_SHOWN {
+                let fighter = gen_player(lvl);
+                if faction == "All" || fighter.faction == faction {
+                    v.push(fighter);
+                }
+            }
+            v.sort_by(|a, b| (a.level, a.name.as_str()).cmp(&(b.level, b.name.as_str())));
+            v.truncate(PVP_SHOWN);
+            *self.opps.borrow_mut() = v;
+            self.pvp_result.set_text("");
+            self.refresh_pvp();
+        }
+
+        pub(crate) fn refresh_pvp(self: &Rc<Self>) {
+            while let Some(c) = self.pvp_list.first_child() { self.pvp_list.remove(&c); }
+            let faction = PVP_FACTIONS[(self.pvp_faction.selected() as usize).min(PVP_FACTIONS.len() - 1)];
+            let opponents = self.opps.borrow();
+            let mut visible: Vec<(usize, &Fighter)> = opponents.iter().enumerate()
+                .filter(|(_, f)| faction == "All" || f.faction == faction)
+                .collect();
+            visible.sort_by(|a, b| (a.1.level, a.1.name.as_str()).cmp(&(b.1.level, b.1.name.as_str())));
+
+            for (i, o) in visible.into_iter() {
+                let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+                pad(&row, 6);
+                let info = gtk::Box::new(gtk::Orientation::Vertical, 2);
+                info.set_hexpand(true);
+                info.set_tooltip_text(Some(&o.detail()));
+                let name = gtk::Label::new(None);
+                name.set_xalign(0.0);
+                name.set_markup(&format!("<b>{}</b>  <span foreground='{}' size='small'>{}</span>",
+                    glib::markup_escape_text(o.name.as_str()), fcol(&o.faction), o.faction));
+                let sub = gtk::Label::new(Some(&o.summary()));
+                sub.set_xalign(0.0); sub.add_css_class("dim-label");
+                info.append(&name); info.append(&sub);
+                let btn = gtk::Button::with_label("⚔");
+                btn.set_tooltip_text(Some("Duel this player with your current gear, abilities, HP, mana and stamina"));
+                btn.set_valign(gtk::Align::Center);
+                { let u = self.clone(); btn.connect_clicked(move |_| u.duel(i)); }
+                row.append(&info); row.append(&btn);
+                let fr = gtk::Frame::new(None);
+                fr.set_child(Some(&row));
+                self.pvp_list.append(&fr);
+            }
+        }
+
+        pub(crate) fn duel(self: &Rc<Self>, i: usize) {
+            let opp = {
+                let o = self.opps.borrow();
+                match o.get(i) { Some(x) => x.clone(), None => return }
+            };
+            let Some(a) = self.active.get() else { return };
+            let (text, msgs) = {
+                let mut s = self.save.borrow_mut();
+                let Some(h) = s.heroes.get_mut(a) else { return };
+                let me = h.fighter();
+                let d = fight(&me, &opp);
+                let rounds = d.lines.len();
+                let mut msgs: Vec<Msg> = vec![m("PvP", format!(
+                    "⚔ Duel: {} (Lv {}, {}) vs {} (Lv {}, {})",
+                    me.name, me.level, CLASSES[me.class].specs[me.spec].0,
+                    opp.name, opp.level, CLASSES[opp.class].specs[opp.spec].0))];
+                msgs.extend(d.lines.into_iter().map(|l| m("PvP", l)));
+                h.mana = d.mana;
+                h.sta = d.sta;
+                let text;
+                if d.won {
+                    let honor = 10 + opp.level / 5;
+                    let gold = opp.level * 2 + rnd(10);
+                    h.hp = d.hp.max(1);
+                    h.wins += 1; h.honor += honor; h.gold += gold;
+                    text = format!("🏆 Victory vs {} (Lv {}) in {rounds} rounds: +{honor} honor, +{gold} gold", opp.name, opp.level);
+                } else {
+                    h.hp = (h.maxes().0 / 10).max(1);
+                    h.losses += 1; h.honor += 1;
+                    text = format!("💀 Defeat vs {} (Lv {}) after {rounds} rounds: +1 honor — you wake at 10% HP", opp.name, opp.level);
+                }
+                msgs.push(m("PvP", text.clone()));
+                h.check_achievements(&mut msgs);
+                (text, msgs)
+            };
+            self.pvp_result.set_text(&text);
+            self.finish(msgs);
+        }
+    }
