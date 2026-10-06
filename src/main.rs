@@ -8,6 +8,8 @@ use std::{
 };
 use Role::{Healer, Melee, Ranged, Tank};
 use Wt::{Axe, Bow, Crossbow, Dagger, Fist, Gun, Mace, Polearm, Staff, Sword, Wand, Warglaive};
+use K::{Absorb, Buff, Dmg, Dot, Guard, Heal, Kick, Leech, Stun, Util};
+use R::{Free, Mana, Stam};
 
 const APP_TITLE: &str = "MAH's World of Todo";
 const MAX_LEVEL: u32 = 90;
@@ -17,6 +19,12 @@ const PVP_SHOWN: usize = 40;
 const PROF_LEVEL: u32 = 5;
 const GATHER_MAX: usize = 4; // CATS[1..=4] are gathering, the rest are crafting
 const BAG_MAX: usize = 30;
+const MAX_QGOAL: u32 = 15; // max kills / gathers per quest
+const GATHER_CHANCE: u32 = 55; // % chance a gather press yields the item
+const GATHER_DROP: u32 = 25; // % chance a gather press also drops a potion
+const STEP_DROP: u32 = 35; // % chance a finished kill step drops a potion
+const POT_PCT: u32 = 40; // potions restore this % of the bar
+const STORE_SIZE: usize = 10;
 
 const FACTIONS: [&str; 2] = ["Horde", "Alliance"];
 const HORDE: [&str; 6] = ["Orc", "Undead (Forsaken)", "Tauren", "Troll", "Blood Elf", "Goblin"];
@@ -40,6 +48,14 @@ const SYL1: [&str; 12] = ["Ka", "Mor", "Thal", "Zul", "Bren", "Gor", "Ael", "Shi
 const SYL2: [&str; 10] = ["ga", "di", "we", "ra", "io", "tha", "mar", "ri", "lo", "za"];
 const SYL3: [&str; 8] = ["n", "x", "th", "s", "k", "r", "l", "nd"];
 
+const MOBS: &[&str] = &[
+    "Kobolds", "Murlocs", "Gnolls", "Defias Bandits", "Timber Wolves", "Harpies", "Forest Trolls", "Skeletons",
+    "Ghouls", "Giant Spiders", "Wild Boars", "Ogres", "Imps", "Wraiths", "Scorpids",
+];
+
+// potions: (name, icon)
+const POT: [(&str, &str); 3] = [("Health Potion", "🧪"), ("Mana Potion", "🔷"), ("Stamina Potion", "⚡")];
+
 // ---------- equipment tables ----------
 const SLOTS: [&str; 16] = [
     "Head", "Shoulders", "Chest", "Wrist", "Hands", "Waist", "Legs", "Feet", "Cloak", "Necklace",
@@ -53,15 +69,16 @@ const QCOL: [&str; 7] = ["#9d9d9d", "#ffffff", "#1eff00", "#0070dd", "#a335ee", 
 const QMULT: [u32; 7] = [80, 100, 112, 128, 150, 190, 140]; // power multiplier (%)
 const QILVL: [i32; 7] = [-2, 0, 2, 5, 9, 15, 6]; // item level offset
 const QSTAT: [u32; 7] = [0, 0, 30, 34, 38, 44, 34]; // bonus stat size (% of ilvl)
-const QSELL: [u32; 7] = [1, 2, 3, 5, 8, 25, 0]; // vendor value factor
+const QSELL: [u32; 7] = [1, 2, 3, 5, 8, 25, 0]; // vendor sell factor
+const QBUY: [u32; 7] = [40, 60, 100, 250, 600, 1500, 0]; // store price multiplier (%)
 const Q_LEGENDARY: usize = 5;
 const Q_HEIRLOOM: usize = 6;
 
 const QUALITY_GUIDE: &str = "Poor (grey) — low-level Normal quests; vendor trash, just sell it.\n\
 Common (white) — Normal quests and vendors; sell or discard.\n\
-Uncommon (green) — any quest, crafting and random drops; always has an \"of the …\" stat suffix.\n\
-Rare (blue) — crafting, quests, Dungeon/Raid tiers and random drops (generally level 20+).\n\
-Epic (purple) — high-end crafting, Dungeon/Raid/World Boss tiers, rare drops (generally level 40+).\n\
+Uncommon (green) — any quest, crafting, the Store and random drops; always has an \"of the …\" stat suffix.\n\
+Rare (blue) — crafting, quests, the Store (level 20+), Dungeon/Raid tiers and random drops.\n\
+Epic (purple) — high-end crafting, Dungeon/Raid/World Boss tiers, rare Store stock (level 40+).\n\
 Legendary (orange) — level 40+ Raid / World Boss quests only, ~1.5–3% per drop; unique proper names.\n\
 Heirloom (cyan) — a cache every 20th completed quest; item level scales with your level.\n\
 Cosmetic — appearance-only armor with no stats; worn only in empty slots.";
@@ -236,6 +253,325 @@ fn armor_kind(s: &str) -> Kind {
     match s { "Cloth" => Kind::Cloth, "Leather" => Kind::Leather, "Mail" => Kind::Mail, _ => Kind::Plate }
 }
 
+// ---------- abilities ----------
+// K = what the ability does in combat, R = which bar it spends.
+//   Dmg    p = % of your ATK dealt as damage
+//   Dot    p = % of your ATK dealt in total over 3 rounds
+//   Leech  p = % of ATK as damage, you heal 40% of it
+//   Heal   p = % of your max HP restored (x1.4 for Healer specs)
+//   Absorb p = % of your max HP as a damage shield
+//   Stun   p = % of ATK as damage (0 = pure crowd control); target loses its next turn
+//   Kick   p = % of ATK as damage; target's next action is a basic attack
+//   Buff   p = % bonus damage for 3 rounds
+//   Guard  p = % less damage taken for 3 rounds
+//   Util   no combat effect (travel, utility, out-of-combat buffs)
+// c = cost in % of the max bar, cd = rounds between uses.
+// The percentages are scaled approximations of the retail tooltip coefficients, not exact values.
+#[derive(Clone, Copy, PartialEq)]
+enum K { Dmg, Dot, Leech, Heal, Absorb, Stun, Kick, Buff, Guard, Util }
+#[derive(Clone, Copy, PartialEq)]
+enum R { Mana, Stam, Free }
+
+struct Ab {
+    l: u32,
+    n: &'static str,
+    k: K,
+    p: u32,
+    cd: u32,
+    r: R,
+    c: u32,
+    sp: &'static [&'static str], // empty = every spec
+}
+
+const ALL: &[&str] = &[];
+
+#[allow(clippy::too_many_arguments)]
+const fn ab(l: u32, n: &'static str, k: K, p: u32, cd: u32, r: R, c: u32, sp: &'static [&'static str]) -> Ab {
+    Ab { l, n, k, p, cd, r, c, sp }
+}
+const fn ut(l: u32, n: &'static str) -> Ab {
+    Ab { l, n, k: Util, p: 0, cd: 0, r: Free, c: 0, sp: ALL }
+}
+
+const AB_DK: &[Ab] = &[
+    ab(1, "Death Strike", Leech, 85, 1, Stam, 12, ALL),
+    ab(1, "Rune Strike", Dmg, 95, 1, Stam, 10, ALL),
+    ab(1, "Marrowrend", Dmg, 110, 2, Stam, 14, &["Blood"]),
+    ab(1, "Blood Boil", Dot, 150, 3, Stam, 14, &["Blood", "Unholy"]),
+    ab(1, "Howling Blast", Dmg, 120, 2, Mana, 12, &["Frost"]),
+    ab(2, "Death Grip", Stun, 35, 6, Stam, 10, ALL),
+    ab(3, "Mind Freeze", Kick, 40, 4, Stam, 8, ALL),
+    ab(4, "Raise Dead", Dot, 135, 5, Mana, 15, ALL),
+    ab(5, "Anti-Magic Shell", Absorb, 30, 6, Mana, 12, ALL),
+    ab(7, "Icebound Fortitude", Guard, 40, 8, Stam, 10, ALL),
+    ab(10, "Death and Decay", Dot, 180, 4, Mana, 16, ALL),
+    ut(10, "Path of Frost"),
+    ut(13, "Death's Advance"),
+    ab(19, "Empower Rune Weapon", Buff, 30, 10, Free, 0, ALL),
+];
+
+const AB_DH: &[Ab] = &[
+    ab(1, "Demon's Bite", Dmg, 90, 1, Stam, 8, &["Havoc", "Devourer"]),
+    ab(1, "Shear", Dmg, 90, 1, Stam, 8, &["Vengeance"]),
+    ab(1, "Chaos Strike", Dmg, 120, 2, Stam, 14, &["Havoc", "Devourer"]),
+    ab(1, "Soul Cleave", Leech, 125, 2, Stam, 16, &["Vengeance"]),
+    ab(2, "Fel Rush", Dmg, 75, 3, Stam, 8, &["Havoc", "Devourer"]),
+    ab(2, "Infernal Strike", Dmg, 75, 3, Stam, 8, &["Vengeance"]),
+    ab(3, "Disrupt", Kick, 30, 4, Stam, 6, ALL),
+    ab(4, "Immolation Aura", Dot, 120, 4, Mana, 10, ALL),
+    ab(5, "Blur", Guard, 35, 7, Stam, 10, &["Havoc", "Vengeance"]),
+    ab(5, "Fiendish Overhaul", Guard, 35, 7, Stam, 10, &["Devourer"]),
+    ab(8, "Consume Magic", Dmg, 60, 3, Mana, 8, ALL),
+    ab(10, "Metamorphosis", Buff, 40, 10, Free, 0, ALL),
+    ut(10, "Glide"),
+    ut(12, "Spectral Sight"),
+    ab(19, "Chaos Nova", Stun, 70, 7, Mana, 14, ALL),
+];
+
+const AB_DRUID: &[Ab] = &[
+    ab(1, "Wrath", Dmg, 100, 1, Mana, 6, ALL),
+    ab(1, "Moonfire", Dot, 130, 2, Mana, 8, ALL),
+    ab(2, "Regrowth", Heal, 22, 2, Mana, 12, ALL),
+    ab(2, "Rejuvenation", Heal, 26, 2, Mana, 10, ALL),
+    ab(3, "Bear Form", Guard, 25, 8, Stam, 5, ALL),
+    ab(3, "Growl", Kick, 20, 5, Stam, 5, ALL),
+    ab(3, "Mangle", Dmg, 105, 1, Stam, 12, &["Feral", "Guardian"]),
+    ab(4, "Cat Form", Buff, 15, 8, Stam, 5, ALL),
+    ab(4, "Rake", Dot, 140, 2, Stam, 10, &["Feral"]),
+    ab(4, "Shred", Dmg, 115, 1, Stam, 12, &["Feral"]),
+    ut(6, "Travel Form"),
+    ut(6, "Dash"),
+    ab(8, "Barkskin", Guard, 30, 8, Mana, 8, ALL),
+    ab(10, "Entangling Roots", Stun, 50, 7, Mana, 10, ALL),
+    ab(10, "Mark of the Wild", Buff, 10, 12, Mana, 8, ALL),
+    ut(10, "Teleport: Moonglade"),
+    ut(13, "Revive / Rebirth"),
+    ab(19, "Stampeding Roar", Buff, 20, 10, Stam, 5, ALL),
+];
+
+const AB_EVOKER: &[Ab] = &[
+    ab(1, "Living Flame", Dmg, 105, 1, Mana, 6, &["Augmentation", "Devastation"]),
+    ab(1, "Living Flame", Heal, 20, 1, Mana, 8, &["Preservation"]),
+    ab(1, "Azure Strike", Dmg, 80, 1, Mana, 4, ALL),
+    ab(2, "Emerald Blossom", Heal, 28, 3, Mana, 14, ALL),
+    ab(3, "Disintegrate", Dot, 170, 3, Mana, 14, ALL),
+    ab(4, "Fire Breath", Dmg, 160, 3, Mana, 16, ALL),
+    ab(5, "Wing Buffeting", Stun, 40, 6, Mana, 8, ALL),
+    ab(8, "Blessing of the Bronze", Buff, 12, 12, Mana, 8, ALL),
+    ut(10, "Soar"),
+    ut(10, "Skyriding"),
+    ab(10, "Deep Breath", Dmg, 200, 6, Mana, 18, ALL),
+    ut(13, "Rescue"),
+    ab(19, "Time Dilation", Guard, 35, 8, Mana, 10, ALL),
+];
+
+const AB_HUNTER: &[Ab] = &[
+    ab(1, "Arcane Shot", Dmg, 95, 1, Stam, 8, &["Marksmanship", "Survival"]),
+    ab(1, "Cobra Shot", Dmg, 95, 1, Stam, 8, &["Beast Mastery"]),
+    ab(1, "Auto Shot", Dmg, 85, 1, Free, 0, ALL),
+    ab(2, "Steady Shot", Dmg, 100, 1, Stam, 6, ALL),
+    ab(3, "Kill Command", Dmg, 140, 2, Stam, 12, &["Beast Mastery"]),
+    ab(3, "Aimed Shot", Dmg, 170, 3, Stam, 16, &["Marksmanship"]),
+    ab(3, "Raptor Strike", Dmg, 120, 1, Stam, 10, &["Survival"]),
+    ut(4, "Call Pet"),
+    ut(4, "Revive Pet"),
+    ab(4, "Mend Pet", Heal, 12, 4, Mana, 10, ALL),
+    ut(5, "Disengage"),
+    ab(7, "Wing Clip", Stun, 35, 6, Stam, 6, &["Survival"]),
+    ab(7, "Freezing Trap", Stun, 25, 8, Mana, 10, &["Beast Mastery", "Marksmanship"]),
+    ab(8, "Exhilaration", Heal, 30, 8, Free, 0, ALL),
+    ab(10, "Aspect of the Turtle", Guard, 50, 12, Free, 0, ALL),
+    ut(10, "Tame Beast"),
+    ut(13, "Feign Death"),
+    ab(19, "Tar Trap", Dot, 90, 6, Mana, 10, ALL),
+];
+
+const AB_MAGE: &[Ab] = &[
+    ab(1, "Frostbolt", Dmg, 110, 1, Mana, 8, ALL),
+    ab(2, "Fire Blast", Dmg, 120, 2, Mana, 8, ALL),
+    ab(3, "Frost Nova", Stun, 55, 6, Mana, 10, ALL),
+    ut(4, "Blink"),
+    ut(5, "Conjure Refreshment"),
+    ab(6, "Arcane Explosion", Dmg, 100, 1, Mana, 9, ALL),
+    ab(7, "Counterspell", Kick, 40, 5, Mana, 6, ALL),
+    ab(8, "Arcane Intellect", Buff, 10, 12, Mana, 6, ALL),
+    ut(9, "Slow Fall"),
+    ab(10, "Polymorph", Stun, 0, 8, Mana, 10, ALL),
+    ab(16, "Invisibility", Guard, 40, 10, Mana, 8, ALL),
+    ab(18, "Cone of Cold", Dmg, 150, 3, Mana, 14, ALL),
+    ut(21, "Teleport"),
+    ut(24, "Portal"),
+    ab(49, "Time Warp", Buff, 30, 14, Mana, 10, ALL),
+];
+
+const AB_MONK: &[Ab] = &[
+    ab(1, "Tiger Palm", Dmg, 90, 1, Stam, 8, ALL),
+    ab(2, "Blackout Kick", Dmg, 115, 1, Stam, 12, ALL),
+    ut(3, "Roll"),
+    ab(4, "Vivify", Heal, 24, 2, Mana, 12, ALL),
+    ab(5, "Touch of Death", Dmg, 220, 8, Stam, 16, ALL),
+    ab(7, "Spear Hand Strike", Kick, 35, 4, Stam, 6, ALL),
+    ab(8, "Fortifying Brew", Guard, 35, 9, Stam, 10, ALL),
+    ab(10, "Crackling Jade Lightning", Dot, 130, 2, Mana, 10, ALL),
+    ut(10, "Mystic Touch"),
+    ut(13, "Transcendence"),
+    ab(19, "Leg Sweep", Stun, 50, 7, Stam, 12, ALL),
+];
+
+const AB_PALADIN: &[Ab] = &[
+    ab(1, "Crusader Strike", Dmg, 100, 1, Stam, 8, ALL),
+    ab(1, "Judgment", Dmg, 125, 2, Mana, 8, ALL),
+    ab(2, "Flash of Light", Heal, 22, 2, Mana, 12, ALL),
+    ab(3, "Shield of the Righteous", Dmg, 130, 2, Stam, 12, &["Protection"]),
+    ab(3, "Word of Glory", Heal, 30, 3, Mana, 10, &["Holy", "Retribution"]),
+    ab(4, "Consecration", Dot, 140, 4, Mana, 12, ALL),
+    ab(5, "Hand of Reckoning", Kick, 25, 5, Stam, 5, ALL),
+    ab(7, "Rebuke", Kick, 40, 4, Stam, 6, ALL),
+    ab(8, "Divine Protection", Guard, 30, 8, Mana, 8, ALL),
+    ab(10, "Divine Shield", Guard, 80, 14, Free, 0, ALL),
+    ab(10, "Lay on Hands", Heal, 70, 16, Free, 0, ALL),
+    ab(10, "Devotion Aura", Guard, 12, 12, Mana, 6, ALL),
+    ab(13, "Blessing of Protection", Absorb, 25, 9, Mana, 10, ALL),
+    ab(19, "Hammer of Justice", Stun, 60, 7, Mana, 10, ALL),
+];
+
+const AB_PRIEST: &[Ab] = &[
+    ab(1, "Smite", Dmg, 100, 1, Mana, 6, ALL),
+    ab(1, "Shadow Word: Pain", Dot, 140, 2, Mana, 8, ALL),
+    ab(2, "Flash Heal", Heal, 25, 2, Mana, 12, ALL),
+    ab(3, "Power Word: Shield", Absorb, 22, 3, Mana, 10, ALL),
+    ab(4, "Renew", Heal, 20, 2, Mana, 8, ALL),
+    ab(5, "Mind Blast", Dmg, 150, 2, Mana, 12, ALL),
+    ab(7, "Psychic Scream", Stun, 25, 8, Mana, 12, ALL),
+    ab(8, "Desperate Prayer", Heal, 35, 8, Mana, 8, ALL),
+    ab(10, "Power Word: Fortitude", Buff, 10, 12, Mana, 8, ALL),
+    ut(10, "Leap of Faith"),
+    ab(13, "Fade", Guard, 30, 8, Mana, 8, ALL),
+    ut(19, "Mass Dispel"),
+];
+
+const AB_ROGUE: &[Ab] = &[
+    ab(1, "Sinister Strike", Dmg, 100, 1, Stam, 8, ALL),
+    ab(1, "Eviscerate", Dmg, 170, 3, Stam, 16, ALL),
+    ab(2, "Stealth", Buff, 25, 10, Free, 0, ALL),
+    ab(3, "Slice and Dice", Buff, 30, 8, Stam, 8, &["Assassination", "Outlaw"]),
+    ab(3, "Ambush", Dmg, 160, 5, Stam, 10, &["Subtlety"]),
+    ab(4, "Kick", Kick, 40, 4, Stam, 6, ALL),
+    ab(5, "Kidney Shot", Stun, 50, 7, Stam, 12, ALL),
+    ab(7, "Cheap Shot", Stun, 40, 8, Stam, 10, ALL),
+    ab(8, "Crimson Vial", Heal, 18, 5, Stam, 8, ALL),
+    ab(10, "Vanish", Guard, 60, 12, Free, 0, ALL),
+    ut(10, "Sprint"),
+    ab(13, "Cloak of Shadows", Guard, 40, 10, Free, 0, ALL),
+    ab(19, "Blind", Stun, 0, 9, Stam, 8, ALL),
+];
+
+const AB_SHAMAN: &[Ab] = &[
+    ab(1, "Lightning Bolt", Dmg, 105, 1, Mana, 6, ALL),
+    ab(1, "Primal Strike", Dmg, 105, 1, Stam, 8, &["Enhancement"]),
+    ab(2, "Healing Surge", Heal, 24, 2, Mana, 12, ALL),
+    ab(3, "Flame Shock", Dot, 140, 2, Mana, 8, ALL),
+    ab(4, "Lava Burst", Dmg, 150, 3, Mana, 12, &["Elemental"]),
+    ab(4, "Chain Lightning", Dmg, 130, 2, Mana, 12, &["Enhancement", "Restoration"]),
+    ut(5, "Ghost Wolf"),
+    ab(7, "Wind Shear", Kick, 40, 4, Mana, 6, ALL),
+    ab(8, "Astral Shift", Guard, 35, 9, Free, 0, ALL),
+    ab(10, "Skyfury", Buff, 12, 12, Mana, 8, ALL),
+    ab(10, "Bloodlust", Buff, 35, 14, Free, 0, ALL), // shown as Heroism for Alliance
+    ab(13, "Capacitor Totem", Stun, 30, 9, Mana, 10, ALL),
+    ut(19, "Earthbind Totem"),
+];
+
+const AB_WARLOCK: &[Ab] = &[
+    ab(1, "Shadow Bolt", Dmg, 110, 1, Mana, 8, &["Affliction", "Demonology"]),
+    ab(1, "Incinerate", Dmg, 115, 1, Mana, 8, &["Destruction"]),
+    ab(1, "Curse of Agony", Dot, 150, 2, Mana, 8, ALL),
+    ab(2, "Summon Imp", Dot, 110, 5, Mana, 10, ALL),
+    ab(3, "Corruption", Dot, 145, 2, Mana, 8, &["Affliction"]),
+    ab(3, "Drain Life", Leech, 120, 2, Mana, 10, &["Demonology", "Destruction"]),
+    ab(4, "Create Healthstone", Heal, 25, 10, Free, 0, ALL),
+    ab(5, "Fear", Stun, 0, 8, Mana, 10, ALL),
+    ab(7, "Spell Lock", Kick, 40, 4, Mana, 6, ALL),
+    ut(7, "Felhunter"),
+    ab(8, "Unending Resolve", Guard, 35, 9, Free, 0, ALL),
+    ab(10, "Summon Voidwalker", Guard, 20, 8, Mana, 10, ALL),
+    ut(10, "Soulstone"),
+    ut(13, "Ritual of Summoning"),
+    ab(19, "Shadowfury", Stun, 70, 7, Mana, 14, ALL),
+];
+
+const AB_WARRIOR: &[Ab] = &[
+    ab(1, "Slam", Dmg, 110, 1, Stam, 10, ALL),
+    ab(1, "Charge", Stun, 40, 6, Free, 0, ALL),
+    ab(2, "Shield Slam", Dmg, 140, 2, Stam, 12, &["Protection"]),
+    ab(2, "Bloodthirst", Leech, 130, 2, Stam, 12, &["Fury"]),
+    ab(2, "Mortal Strike", Dmg, 150, 3, Stam, 14, &["Arms"]),
+    ab(3, "Taunt", Kick, 15, 5, Stam, 5, ALL),
+    ab(3, "Victory Rush", Leech, 100, 3, Free, 0, ALL),
+    ab(4, "Execute", Dmg, 190, 4, Stam, 16, ALL),
+    ab(5, "Whirlwind", Dmg, 125, 2, Stam, 14, ALL),
+    ab(7, "Pummel", Kick, 40, 4, Stam, 6, ALL),
+    ab(8, "Shield Wall", Guard, 45, 10, Free, 0, &["Protection"]),
+    ab(8, "Enraged Regeneration", Heal, 30, 9, Free, 0, &["Arms", "Fury"]),
+    ab(10, "Battle Shout", Buff, 10, 12, Free, 0, ALL),
+    ab(10, "Heroic Leap", Dmg, 90, 5, Stam, 8, ALL),
+    ab(13, "Spell Reflection", Guard, 40, 9, Free, 0, ALL),
+    ab(19, "Rallying Cry", Absorb, 20, 12, Free, 0, ALL),
+];
+
+fn spec_ok(a: &Ab, spec: &str) -> bool { a.sp.is_empty() || a.sp.iter().any(|s| *s == spec) }
+
+/// Abilities this class/spec knows at `level`.
+fn known(class: usize, spec: usize, level: u32) -> Vec<&'static Ab> {
+    let list: &'static [Ab] = CLASSES[class].abilities;
+    let sn = CLASSES[class].specs[spec].0;
+    list.iter().filter(|a| a.l <= level && spec_ok(a, sn)).collect()
+}
+
+fn aname(a: &Ab, faction: &str) -> &'static str {
+    if a.n == "Bloodlust" && faction == "Alliance" { "Heroism" } else { a.n }
+}
+
+fn kname(k: K) -> &'static str {
+    match k {
+        Dmg => "Damage", Dot => "Damage over time", Leech => "Drain", Heal => "Heal", Absorb => "Shield",
+        Stun => "Stun", Kick => "Interrupt", Buff => "Buff", Guard => "Defensive", Util => "Utility",
+    }
+}
+
+fn kcol(k: K) -> &'static str {
+    match k {
+        Dmg | Dot | Leech => "#e0453a",
+        Heal | Absorb => "#3fb950",
+        Stun | Kick => "#d29922",
+        Buff | Guard => "#4a8fe7",
+        Util => "#8b949e",
+    }
+}
+
+fn ab_effect(a: &Ab, st: &Stats) -> String {
+    let dmg = st.atk * a.p / 100;
+    let eff = match a.k {
+        Dmg => format!("Deals ~{dmg} damage"),
+        Dot => format!("~{}/round for 3 rounds (~{} total)", dmg / 3, dmg / 3 * 3),
+        Leech => format!("Deals ~{dmg} damage, heals you for ~{}", dmg * 40 / 100),
+        Heal => format!("Heals ~{} HP", st.hp * a.p / 100 * st.hmul / 100),
+        Absorb => format!("Absorbs ~{} damage", st.hp * a.p / 100),
+        Stun => if a.p > 0 { format!("Deals ~{dmg} and stuns for 1 round") } else { "Incapacitates the target for 1 round".to_string() },
+        Kick => format!("Deals ~{dmg} and interrupts (target's next action is a basic attack)"),
+        Buff => format!("+{}% damage for 3 rounds", a.p),
+        Guard => format!("-{}% damage taken for 3 rounds", a.p),
+        Util => return "Utility — no combat effect".to_string(),
+    };
+    let cost = match a.r {
+        Free => "free".to_string(),
+        Mana => format!("{}% mana (~{})", a.c, st.mana * a.c / 100),
+        Stam => format!("{}% stamina (~{})", a.c, st.sta * a.c / 100),
+    };
+    let cd = if a.cd >= 2 { format!(" · cooldown {} rounds", a.cd) } else { String::new() };
+    format!("{eff} · cost {cost}{cd}")
+}
+
 // ---------- classes ----------
 #[derive(Clone, Copy, PartialEq)]
 enum Role { Tank, Healer, Melee, Ranged }
@@ -249,7 +585,7 @@ struct Class {
     name: &'static str,
     armor: &'static str,
     specs: &'static [(&'static str, Role)],
-    abilities: [&'static str; 5],
+    abilities: &'static [Ab],
     weapons: &'static [Wt],
     dual: bool,
     shield: bool,
@@ -258,43 +594,43 @@ struct Class {
 
 const CLASSES: [Class; 13] = [
     Class { name: "Death Knight", armor: "Plate", specs: &[("Blood", Tank), ("Frost", Melee), ("Unholy", Melee)],
-            abilities: ["Death Strike", "Obliterate", "Death and Decay", "Anti-Magic Shell", "Death Grip"],
+            abilities: AB_DK,
             weapons: &[Axe, Mace, Sword, Polearm], dual: true, shield: false, held: false },
     Class { name: "Demon Hunter", armor: "Leather", specs: &[("Havoc", Melee), ("Vengeance", Tank), ("Devourer", Melee)],
-            abilities: ["Demon's Bite", "Eye Beam", "Metamorphosis", "Fel Rush", "Immolation Aura"],
+            abilities: AB_DH,
             weapons: &[Fist, Sword, Axe, Warglaive], dual: true, shield: false, held: false },
     Class { name: "Druid", armor: "Leather", specs: &[("Balance", Ranged), ("Feral", Melee), ("Guardian", Tank), ("Restoration", Healer)],
-            abilities: ["Moonfire", "Rejuvenation", "Rake", "Bear Form", "Starfire"],
+            abilities: AB_DRUID,
             weapons: &[Dagger, Fist, Mace, Polearm, Staff], dual: false, shield: false, held: true },
     Class { name: "Evoker", armor: "Mail", specs: &[("Augmentation", Ranged), ("Devastation", Ranged), ("Preservation", Healer)],
-            abilities: ["Living Flame", "Fire Breath", "Azure Strike", "Emerald Blossom", "Hover"],
+            abilities: AB_EVOKER,
             weapons: &[Dagger, Fist, Axe, Mace, Sword, Staff], dual: false, shield: false, held: true },
     Class { name: "Hunter", armor: "Mail", specs: &[("Beast Mastery", Ranged), ("Marksmanship", Ranged), ("Survival", Melee)],
-            abilities: ["Arcane Shot", "Kill Command", "Multi-Shot", "Aspect of the Cheetah", "Concussive Shot"],
+            abilities: AB_HUNTER,
             weapons: &[Bow, Crossbow, Gun, Axe, Dagger, Fist, Polearm, Staff, Sword], dual: false, shield: false, held: false },
     Class { name: "Mage", armor: "Cloth", specs: &[("Arcane", Ranged), ("Fire", Ranged), ("Frost", Ranged)],
-            abilities: ["Frostbolt", "Fire Blast", "Frost Nova", "Blink", "Polymorph"],
+            abilities: AB_MAGE,
             weapons: &[Dagger, Sword, Staff, Wand], dual: false, shield: false, held: true },
     Class { name: "Monk", armor: "Leather", specs: &[("Brewmaster", Tank), ("Mistweaver", Healer), ("Windwalker", Melee)],
-            abilities: ["Tiger Palm", "Blackout Kick", "Vivify", "Roll", "Spinning Crane Kick"],
+            abilities: AB_MONK,
             weapons: &[Fist, Mace, Sword, Axe, Polearm, Staff], dual: true, shield: false, held: false },
     Class { name: "Paladin", armor: "Plate", specs: &[("Holy", Healer), ("Protection", Tank), ("Retribution", Melee)],
-            abilities: ["Crusader Strike", "Holy Light", "Judgment", "Divine Shield", "Hammer of Justice"],
+            abilities: AB_PALADIN,
             weapons: &[Axe, Mace, Sword, Polearm], dual: false, shield: true, held: false },
     Class { name: "Priest", armor: "Cloth", specs: &[("Discipline", Healer), ("Holy", Healer), ("Shadow", Ranged)],
-            abilities: ["Smite", "Power Word: Shield", "Flash Heal", "Shadow Word: Pain", "Mind Blast"],
+            abilities: AB_PRIEST,
             weapons: &[Dagger, Mace, Staff, Wand], dual: false, shield: false, held: true },
     Class { name: "Rogue", armor: "Leather", specs: &[("Assassination", Melee), ("Outlaw", Melee), ("Subtlety", Melee)],
-            abilities: ["Sinister Strike", "Stealth", "Eviscerate", "Evasion", "Kick"],
+            abilities: AB_ROGUE,
             weapons: &[Dagger, Fist, Mace, Sword, Axe], dual: true, shield: false, held: false },
     Class { name: "Shaman", armor: "Mail", specs: &[("Elemental", Ranged), ("Enhancement", Melee), ("Restoration", Healer)],
-            abilities: ["Lightning Bolt", "Healing Wave", "Flame Shock", "Earth Shock", "Ghost Wolf"],
+            abilities: AB_SHAMAN,
             weapons: &[Axe, Dagger, Fist, Mace, Staff], dual: true, shield: true, held: true },
     Class { name: "Warlock", armor: "Cloth", specs: &[("Affliction", Ranged), ("Demonology", Ranged), ("Destruction", Ranged)],
-            abilities: ["Shadow Bolt", "Corruption", "Immolate", "Fear", "Drain Life"],
+            abilities: AB_WARLOCK,
             weapons: &[Dagger, Sword, Staff, Wand], dual: false, shield: false, held: true },
     Class { name: "Warrior", armor: "Plate", specs: &[("Arms", Melee), ("Fury", Melee), ("Protection", Tank)],
-            abilities: ["Charge", "Rend", "Thunder Clap", "Hamstring", "Shield Bash"],
+            abilities: AB_WARRIOR,
             weapons: &[Axe, Dagger, Fist, Mace, Polearm, Staff, Sword], dual: true, shield: true, held: false },
 ];
 
@@ -346,6 +682,7 @@ fn m(c: &'static str, s: impl Into<String>) -> Msg { (c, s.into()) }
 fn rnd(n: u32) -> u32 { glib::random_int_range(0, n as i32) as u32 }
 fn pick<T>(a: &[T]) -> &T { &a[rnd(a.len() as u32) as usize] }
 fn ps(a: &[&'static str]) -> &'static str { a[rnd(a.len() as u32) as usize] }
+fn esc(s: &str) -> String { glib::markup_escape_text(s).to_string() }
 fn now() -> String {
     glib::DateTime::now_local().ok()
         .and_then(|d| d.format("%Y-%m-%d %H:%M:%S").ok())
@@ -510,17 +847,45 @@ impl Tier {
     fn loot(self) -> u32 { [25, 50, 100, 100, 100][self as usize] }
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
+enum QKind { #[default] Kill, Gather }
+
+/// One kill target of a Kill quest: a to-do line you type in yourself.
+#[derive(Serialize, Deserialize, Clone)]
+struct Step { text: String, done: bool }
+
+fn make_steps(n: u32) -> Vec<Step> { (0..n).map(|_| Step { text: String::new(), done: false }).collect() }
+
 #[derive(Serialize, Deserialize, Clone)]
 struct Quest {
     title: String, giver: String, tier: Tier, cat: usize, goal: u32, progress: u32,
     chain: bool, part: u32,
     #[serde(default)] zone: String,
     #[serde(default)] bonus: u32,
+    #[serde(default)] qk: QKind,
+    #[serde(default)] target: String, // mob type (Kill) or item (Gather)
+    #[serde(default)] steps: Vec<Step>, // Kill quests only
+    #[serde(default)] tries: u32, // Gather attempts
 }
 impl Quest {
     fn display(&self) -> String {
-        if self.chain { format!("{} (Part {})", self.title, self.part) } else { self.title.clone() }
+        let what = match self.qk {
+            QKind::Kill => format!("Kill {}× {}", self.goal, self.target),
+            QKind::Gather => format!("Gather {}× {}", self.goal, self.target),
+        };
+        let base = if self.title.is_empty() { what } else { format!("{} — {what}", self.title) };
+        if self.chain { format!("{base} (Part {})", self.part) } else { base }
     }
+}
+
+fn gather_item(cat: usize) -> String {
+    match cat {
+        1 => ps(&["Copper Ore", "Tin Ore", "Iron Ore", "Mithril Ore"]),
+        2 => ps(&["Peacebloom", "Silverleaf", "Briarthorn", "Kingsblood"]),
+        3 => ps(&["Ruined Leather Scraps", "Light Hide", "Thick Hide"]),
+        4 => ps(&["Raw Brightscale Fish", "Raw Slitherskin Mackerel", "Oily Blackmouth"]),
+        _ => ps(&["Runed Relic Fragment", "Glowing Ember", "Ancient Scroll", "Crystal Shard", "Wolf Meat", "Linen Cloth"]),
+    }.to_string()
 }
 
 // ---------- items ----------
@@ -565,6 +930,13 @@ impl Item {
     fn sell_value(&self) -> u32 {
         let f = QSELL[self.quality.min(6)];
         if f == 0 { 0 } else { (self.ilvl * f / 3).max(1) }
+    }
+
+    /// Store price: grows with item level and quality, always well above the sell value.
+    fn buy_price(&self) -> u32 {
+        let il = self.ilvl;
+        let base = il * 4 + il * il / 4 + 10;
+        (base * QBUY[self.quality.min(6)] / 100).max(5)
     }
 
     fn stats_inline(&self) -> String {
@@ -745,8 +1117,12 @@ fn gen_name(q: usize, kind: Kind, slot: usize, wt: Option<Wt>, hands: Hands, ai:
 }
 
 fn roll_stats(q: usize, ilvl: u32, class: usize, spec: usize, suffix: Option<usize>) -> Vec<(usize, u32)> {
-    let unit = ilvl * QSTAT[q.min(6)] / 100;
-    let val = || (unit + rnd(3)).max(1);
+    let unit = (ilvl * QSTAT[q.min(6)] / 100) as i32;
+    // every stat lands 1-2 points above or below the base value
+    let val = || -> u32 {
+        let off = [-2i32, -1, 1, 2][rnd(4) as usize];
+        (unit + off).max(1) as u32
+    };
     if let Some(s) = suffix {
         return SUFFIXES[s].1.iter().map(|&st| (st, val())).collect();
     }
@@ -918,6 +1294,30 @@ fn build_gear(class: usize, spec: usize, level: u32) -> Vec<Option<Item>> {
     g
 }
 
+// ---------- store ----------
+fn store_quality(level: u32) -> usize {
+    let r = rnd(100);
+    if level >= 40 && r >= 94 { 4 }
+    else if level >= 20 && r >= 70 { 3 }
+    else if r >= 35 { 2 }
+    else { 1 }
+}
+
+/// Items for sale: usable by the class, ilvl right around the hero's level.
+fn gen_store(class: usize, spec: usize, level: u32) -> Vec<Item> {
+    let base = level.saturating_sub(2).max(1);
+    let mut v: Vec<Item> = vec![];
+    let mut tries = 0;
+    while v.len() < STORE_SIZE && tries < 300 {
+        tries += 1;
+        if let Some(it) = make_item(class, spec, base, random_cat(), store_quality(level)) { v.push(it); }
+    }
+    v.sort_by_key(|i| (i.slot, std::cmp::Reverse(i.quality)));
+    v
+}
+
+fn potion_price(level: u32) -> u32 { 6 + level * 2 }
+
 // ---------- hero ----------
 #[derive(Serialize, Deserialize, Clone)]
 struct LogEntry { time: String, cat: String, msg: String }
@@ -929,9 +1329,13 @@ struct Hero {
     level: u32, xp: u32, gold: u32, talents: u32, done: u32,
     honor: u32, wins: u32, losses: u32,
     zone: String, zone_inst: String,
-    abilities: Vec<String>, gear: Vec<Option<Item>>, prof: Vec<u32>, achievements: Vec<String>,
+    gear: Vec<Option<Item>>, prof: Vec<u32>, achievements: Vec<String>,
     quests: Vec<Quest>, log: Vec<LogEntry>,
     #[serde(default)] bag: Vec<Item>,
+    #[serde(default)] hp: u32,
+    #[serde(default)] mana: u32,
+    #[serde(default)] sta: u32,
+    #[serde(default)] pots: [u32; 3],
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -939,14 +1343,17 @@ struct Save { heroes: Vec<Hero> }
 
 impl Hero {
     fn new(name: String, guild: String, realm: &Realm, faction: &str, race: &str, class: usize, spec: usize) -> Self {
-        Hero {
+        let mut h = Hero {
             name, guild, realm: realm.name.clone(), realm_tier: realm.tier,
             faction: faction.into(), race: race.into(), class, spec,
             level: 1, xp: 0, gold: 0, talents: 0, done: 0, honor: 0, wins: 0, losses: 0,
             zone: start_zone(race).into(), zone_inst: String::new(),
-            abilities: vec![], gear: vec![None; SLOTS.len()], prof: vec![0; CATS.len() - 1],
+            gear: vec![None; SLOTS.len()], prof: vec![0; CATS.len() - 1],
             achievements: vec![], quests: vec![], log: vec![], bag: vec![],
-        }
+            hp: 0, mana: 0, sta: 0, pots: [0; 3],
+        };
+        h.restore_all();
+        h
     }
 
     fn need(&self) -> u32 { 100 + self.level * 50 }
@@ -959,8 +1366,33 @@ impl Hero {
         Fighter {
             name: self.name.clone(), faction: self.faction.clone(), race: self.race.clone(),
             class: self.class, spec: self.spec, level: self.level, gear: self.gear.clone(),
-            abilities: self.abilities.clone(), talents: self.talents,
+            talents: self.talents, cur: Some((self.hp.max(1), self.mana, self.sta)),
         }
+    }
+
+    /// (max hp, max mana, max stamina)
+    fn maxes(&self) -> (u32, u32, u32) {
+        let s = self.fighter().stats();
+        (s.hp, s.mana, s.sta)
+    }
+
+    fn restore_all(&mut self) {
+        let (a, b, c) = self.maxes();
+        self.hp = a; self.mana = b; self.sta = c;
+    }
+
+    fn clamp_res(&mut self) {
+        let (a, b, c) = self.maxes();
+        self.hp = self.hp.min(a).max(1);
+        self.mana = self.mana.min(b);
+        self.sta = self.sta.min(c);
+    }
+
+    fn regen(&mut self, pct: u32) {
+        let (a, b, c) = self.maxes();
+        self.hp = (self.hp + a * pct / 100).min(a);
+        self.mana = (self.mana + b * pct / 100).min(b);
+        self.sta = (self.sta + c * pct / 100).min(c);
     }
 
     fn add_log(&mut self, msgs: Vec<Msg>) {
@@ -994,6 +1426,13 @@ impl Hero {
         }
         self.gear[target] = Some(it);
         Ok(out)
+    }
+
+    fn is_upgrade(&self, it: &Item) -> bool {
+        let cands = candidates(it, self.class, self.two_now());
+        if cands.is_empty() { return false; }
+        let p = item_power(it, self.class, self.spec);
+        cands.iter().any(|&s| self.gear[s].as_ref().map_or(true, |o| item_power(o, self.class, self.spec) < p))
     }
 
     fn stash(&mut self, it: Item, msgs: &mut Vec<Msg>) {
@@ -1037,6 +1476,15 @@ impl Hero {
         self.receive(it, msgs);
     }
 
+    /// Each finished quest step / gather attempt has a chance to drop one random potion (0 or 1).
+    fn step_drop(&mut self, msgs: &mut Vec<Msg>, chance: u32) {
+        if rnd(100) < chance {
+            let k = rnd(3) as usize;
+            self.pots[k] += 1;
+            msgs.push(m("Loot", format!("{} Found a {}!", POT[k].1, POT[k].0)));
+        }
+    }
+
     fn refresh_heirlooms(&mut self) {
         let l = self.level + 6;
         for it in self.gear.iter_mut().flatten().chain(self.bag.iter_mut()) {
@@ -1050,7 +1498,9 @@ impl Hero {
 
     fn turn_in(&mut self, q: &Quest) -> Vec<Msg> {
         let mult = q.tier.mult();
-        let pct = 100 + q.bonus;
+        // gather quests pay +1% per item gathered on top of the linear scaling
+        let extra = if q.qk == QKind::Gather { q.goal } else { 0 };
+        let pct = 100 + q.bonus + extra;
         let xp = 25 * q.goal * mult * pct / 100;
         let mut gold = q.goal * mult * 5 + rnd(10);
         let mut loot = q.tier.loot();
@@ -1062,6 +1512,7 @@ impl Hero {
         self.xp += xp; self.gold += gold; self.done += 1;
         let mut msgs: Vec<Msg> = vec![m("Quest", format!("✔ Quest complete: {} → +{xp} XP, +{gold} gold", q.display()))];
         if q.bonus > 0 { msgs.push(m("Quest", format!("🗺 {} zone bonus: +{}%", q.zone, q.bonus))); }
+        if extra > 0 { msgs.push(m("Quest", format!("🌿 Big haul bonus: +{extra}%"))); }
         if q.cat > 0 { msgs.push(m("Quest", format!("🔨 {} skill +{}", CATS[q.cat], q.goal))); }
 
         let drops = if matches!(q.tier, Tier::Raid | Tier::WorldBoss) { 2 } else { 1 };
@@ -1074,26 +1525,33 @@ impl Hero {
             self.receive(it, &mut msgs);
         }
 
+        let before = self.level;
         while self.xp >= self.need() && self.level < MAX_LEVEL {
             let n = self.need();
             self.xp -= n;
             self.level += 1;
             self.refresh_heirlooms();
             msgs.push(m("Level", format!("⬆ LEVEL UP! You are now level {}", self.level)));
-            let l = self.level as usize;
-            let ab = CLASSES[self.class].abilities;
-            if l % 2 == 0 && l / 2 - 1 < ab.len() {
-                let a = ab[l / 2 - 1].to_string();
-                msgs.push(m("Level", format!("📖 New ability: {a}")));
-                self.abilities.push(a);
-            } else {
+            let fresh: Vec<&'static Ab> = known(self.class, self.spec, self.level)
+                .into_iter().filter(|a| a.l == self.level).collect();
+            if fresh.is_empty() {
                 self.talents += 1;
                 msgs.push(m("Level", "✨ New talent point"));
+            } else {
+                for a in fresh {
+                    msgs.push(m("Level", format!("📖 New ability: {} ({})", aname(a, &self.faction), kname(a.k))));
+                }
             }
             for t in Tier::ALL {
                 if t.unlock() == self.level { msgs.push(m("Level", format!("🔓 {} quests unlocked", t.name()))); }
             }
             if self.level == PROF_LEVEL { msgs.push(m("Level", "🔓 Professions unlocked")); }
+        }
+        if self.level > before {
+            self.restore_all();
+            msgs.push(m("Level", "💚 HP, mana and stamina fully restored"));
+        } else {
+            self.regen(15);
         }
         self.check_achievements(&mut msgs);
         msgs
@@ -1127,16 +1585,19 @@ impl Hero {
 
 // ---------- combat ----------
 #[derive(Clone, Copy)]
-struct Stats { hp: u32, atk: u32, def: u32, crit: u32, heal: u32 }
+struct Stats { hp: u32, atk: u32, def: u32, crit: u32, heal: u32, mana: u32, sta: u32, hmul: u32 }
 
 #[derive(Clone)]
 struct Fighter {
     name: String, faction: String, race: String, class: usize, spec: usize, level: u32,
-    gear: Vec<Option<Item>>, abilities: Vec<String>, talents: u32,
+    gear: Vec<Option<Item>>, talents: u32,
+    cur: Option<(u32, u32, u32)>, // current hp/mana/stamina (None = full)
 }
 
 impl Fighter {
     fn role(&self) -> Role { CLASSES[self.class].specs[self.spec].1 }
+
+    fn abilities(&self) -> Vec<&'static Ab> { known(self.class, self.spec, self.level) }
 
     fn ilvl_avg(&self) -> u32 {
         let v: Vec<u32> = self.gear.iter().flatten().filter(|i| i.kind != Kind::Cosmetic).map(|i| i.ilvl).collect();
@@ -1182,33 +1643,28 @@ impl Fighter {
         Stats {
             hp,
             atk: (10 + self.level * 3 + g) * atk_m / 100
-                + self.abilities.len() as u32 * 3 + self.talents * 4
+                + self.abilities().len() as u32 * 3 + self.talents * 4
                 + tot[prim] + off_prim / 4 + tot[4] / 2 + tot[7] / 3,
             def: (self.level + g / 2) * def_m / 100 * armor / 100 + tot[6] / 2 + shield_def,
             crit: (5 + self.talents + qsum / 3 + tot[5] / 6).min(40),
             heal: if role == Healer { hp * 6 / 100 } else { 0 },
+            mana: 60 + self.level * 6 + tot[3] * 2,
+            sta: 60 + self.level * 4 + tot[0] / 2,
+            hmul: if role == Healer { 140 } else { 100 },
         }
-    }
-
-    fn strike(&self, me: &Stats, foe: &Stats) -> (u32, bool, String) {
-        let name = if self.abilities.is_empty() { "Attack".to_string() } else { pick(&self.abilities).clone() };
-        let base = me.atk * (85 + rnd(31)) / 100;
-        let mut dmg = (base * 100 / (100 + foe.def / 2)).max(1);
-        let crit = rnd(100) < me.crit;
-        if crit { dmg *= 2; }
-        (dmg, crit, name)
     }
 
     fn summary(&self) -> String {
         let c = &CLASSES[self.class];
         let s = self.stats();
-        format!("Lv {} {} {} ({}) · {} · {} · ilvl {} · HP {} ATK {} DEF {}",
+        format!("Lv {} {} {} ({}) · {} · {} · ilvl {} · HP {} ATK {} DEF {} · {} abilities",
                 self.level, self.race, c.name, c.specs[self.spec].0, self.role().name(), c.armor,
-                self.ilvl_avg(), s.hp, s.atk, s.def)
+                self.ilvl_avg(), s.hp, s.atk, s.def, self.abilities().len())
     }
 
     fn detail(&self) -> String {
-        let ab = if self.abilities.is_empty() { "—".to_string() } else { self.abilities.join(", ") };
+        let ab: Vec<&str> = self.abilities().iter().map(|a| aname(a, &self.faction)).collect();
+        let ab = if ab.is_empty() { "—".to_string() } else { ab.join(", ") };
         let mut t = format!("Abilities: {ab}\nTalents: {}\nSetup: {}\n", self.talents, self.setup());
         for (i, slot) in SLOTS.iter().enumerate() {
             match &self.gear[i] {
@@ -1220,24 +1676,227 @@ impl Fighter {
     }
 }
 
-fn fight(a: &Fighter, b: &Fighter) -> (bool, Vec<String>) {
-    let (sa, sb) = (a.stats(), b.stats());
-    let (mut ha, mut hb) = (sa.hp as i64, sb.hp as i64);
-    let mut lines = vec![];
-    for r in 1..=40 {
-        let (da, ca, na) = a.strike(&sa, &sb);
-        hb -= da as i64;
-        let mut line = format!("R{r}: {} {na} → {da}{}", a.name, if ca { " CRIT" } else { "" });
-        if hb <= 0 { lines.push(line); return (true, lines); }
-        let (db, cb, nb) = b.strike(&sb, &sa);
-        ha -= db as i64;
-        line += &format!(" | {} {nb} → {db}{}", b.name, if cb { " CRIT" } else { "" });
-        lines.push(line);
-        if ha <= 0 { return (false, lines); }
-        ha = (ha + sa.heal as i64).min(sa.hp as i64);
-        hb = (hb + sb.heal as i64).min(sb.hp as i64);
+/// One fighter's live state during a duel.
+struct Side {
+    st: Stats,
+    hp: i64,
+    mana: u32,
+    sta: u32,
+    abs: Vec<&'static Ab>,
+    cds: Vec<u32>,
+    absorb: i64,
+    buff: (u32, u32),  // (rounds left, % bonus damage)
+    guard: (u32, u32), // (rounds left, % less damage taken)
+    dot: (u32, u32),   // (rounds left, damage per round)
+    stunned: bool,
+    kicked: bool,
+}
+
+impl Side {
+    fn new(f: &Fighter) -> Self {
+        let st = f.stats();
+        let (hp, mana, sta) = f.cur
+            .map_or((st.hp, st.mana, st.sta), |(h, mn, s)| (h.min(st.hp), mn.min(st.mana), s.min(st.sta)));
+        let abs = f.abilities();
+        let n = abs.len();
+        Side {
+            st, hp: hp.max(1) as i64, mana, sta, abs, cds: vec![0; n], absorb: 0,
+            buff: (0, 0), guard: (0, 0), dot: (0, 0), stunned: false, kicked: false,
+        }
     }
-    (ha * 1000 / sa.hp as i64 >= hb * 1000 / sb.hp as i64, lines)
+}
+
+struct Duel { won: bool, lines: Vec<String>, hp: u32, mana: u32, sta: u32 }
+
+fn cost_of(a: &Ab, s: &Side) -> u32 {
+    match a.r { Mana => s.st.mana * a.c / 100, Stam => s.st.sta * a.c / 100, Free => 0 }
+}
+
+fn hit(me: &Side, foe: &Side, pct: u32) -> (i64, bool) {
+    let mut base = me.st.atk * pct / 100 * (85 + rnd(31)) / 100;
+    if me.buff.0 > 0 { base = base * (100 + me.buff.1) / 100; }
+    let mut dmg = (base * 100 / (100 + foe.st.def / 2)).max(1);
+    let crit = rnd(100) < me.st.crit;
+    if crit { dmg *= 2; }
+    if foe.guard.0 > 0 { dmg = (dmg * (100 - foe.guard.1.min(90)) / 100).max(1); }
+    (dmg as i64, crit)
+}
+
+fn take(s: &mut Side, dmg: i64) {
+    let a = dmg.min(s.absorb);
+    s.absorb -= a;
+    s.hp -= dmg - a;
+}
+
+fn crit_tag(c: bool) -> &'static str { if c { " CRIT" } else { "" } }
+
+/// Pick which ability to use this turn (None = basic attack).
+fn choose(me: &Side, foe: &Side) -> Option<usize> {
+    let maxhp = me.st.hp as i64;
+    let low = me.hp * 100 < maxhp * 50;
+    let mut opts: Vec<(usize, u32)> = vec![];
+    for (i, a) in me.abs.iter().enumerate() {
+        if a.k == Util || me.cds[i] > 0 { continue; }
+        let have = match a.r { Mana => me.mana, Stam => me.sta, Free => u32::MAX };
+        if have < cost_of(a, me) { continue; }
+        let ok = match a.k {
+            Heal => me.hp * 100 < maxhp * 75,
+            Absorb => me.absorb == 0 && me.hp * 100 < maxhp * 90,
+            Guard => me.guard.0 == 0 && me.hp * 100 < maxhp * 70,
+            Buff => me.buff.0 == 0,
+            Stun => !foe.stunned,
+            Kick => !foe.kicked,
+            Dot => foe.dot.0 == 0,
+            _ => true,
+        };
+        if !ok { continue; }
+        let w = match a.k {
+            Heal | Absorb | Guard => if low { 300 } else { 100 },
+            _ => a.p.max(40),
+        };
+        opts.push((i, w));
+    }
+    if opts.is_empty() { return None; }
+    let total: u32 = opts.iter().map(|o| o.1).sum();
+    let mut r = rnd(total);
+    for (i, w) in &opts {
+        if r < *w { return Some(*i); }
+        r -= *w;
+    }
+    Some(opts[0].0)
+}
+
+/// One fighter's action. Returns the log text for it.
+fn turn(f: &Fighter, g: &Fighter, me: &mut Side, foe: &mut Side) -> String {
+    let nm = f.name.as_str();
+    for c in me.cds.iter_mut() { if *c > 0 { *c -= 1; } }
+    let mut pre = String::new();
+    if me.dot.0 > 0 {
+        let d = me.dot.1 as i64;
+        take(me, d);
+        me.dot.0 -= 1;
+        if me.hp <= 0 { return format!("{nm} is finished off by damage over time ({d})"); }
+        pre = format!("[-{d} dot] ");
+    }
+    if me.stunned {
+        me.stunned = false;
+        return format!("{pre}{nm} is stunned and loses the turn");
+    }
+    let interrupted = me.kicked;
+    me.kicked = false;
+    let choice = if interrupted { None } else { choose(me, foe) };
+
+    let body = match choice {
+        None => {
+            let (d, c) = hit(me, foe, 100);
+            take(foe, d);
+            me.mana = (me.mana + me.st.mana * 5 / 100).min(me.st.mana);
+            me.sta = (me.sta + me.st.sta * 5 / 100).min(me.st.sta);
+            let verb = if interrupted { "is interrupted and attacks" } else { "attacks" };
+            format!("{nm} {verb} → {d}{}", crit_tag(c))
+        }
+        Some(i) => {
+            let a: &'static Ab = me.abs[i];
+            let cost = cost_of(a, me);
+            match a.r {
+                Mana => me.mana -= cost.min(me.mana),
+                Stam => me.sta -= cost.min(me.sta),
+                Free => {}
+            }
+            me.cds[i] = a.cd;
+            let an = aname(a, &f.faction);
+            let verb = if a.r == Mana { "casts" } else { "uses" };
+            match a.k {
+                Dmg => {
+                    let (d, c) = hit(me, foe, a.p);
+                    take(foe, d);
+                    format!("{nm} {verb} {an} → {d}{}", crit_tag(c))
+                }
+                Dot => {
+                    let tick = (me.st.atk * a.p / 100 / 3).max(1);
+                    foe.dot = (3, tick);
+                    format!("{nm} {verb} {an} → {} suffers {tick}/round for 3 rounds", g.name)
+                }
+                Leech => {
+                    let (d, c) = hit(me, foe, a.p);
+                    take(foe, d);
+                    let h = (d * 40 / 100).max(1);
+                    me.hp = (me.hp + h).min(me.st.hp as i64);
+                    format!("{nm} {verb} {an} → {d}{} (+{h} HP)", crit_tag(c))
+                }
+                Heal => {
+                    let amt = (me.st.hp * a.p / 100 * me.st.hmul / 100 * (90 + rnd(21)) / 100) as i64;
+                    me.hp = (me.hp + amt).min(me.st.hp as i64);
+                    format!("{nm} {verb} {an} → heals {amt} HP")
+                }
+                Absorb => {
+                    let amt = (me.st.hp * a.p / 100) as i64;
+                    me.absorb += amt;
+                    format!("{nm} {verb} {an} → shield absorbs {amt}")
+                }
+                Stun => {
+                    foe.stunned = true;
+                    if a.p > 0 {
+                        let (d, c) = hit(me, foe, a.p);
+                        take(foe, d);
+                        format!("{nm} {verb} {an} → {d}{} · {} is stunned", crit_tag(c), g.name)
+                    } else {
+                        format!("{nm} {verb} {an} → {} is incapacitated", g.name)
+                    }
+                }
+                Kick => {
+                    let (d, c) = hit(me, foe, a.p);
+                    take(foe, d);
+                    foe.kicked = true;
+                    format!("{nm} {verb} {an} → {d}{} · {} is interrupted", crit_tag(c), g.name)
+                }
+                Buff => {
+                    me.buff = (4, a.p);
+                    format!("{nm} {verb} {an} → +{}% damage", a.p)
+                }
+                Guard => {
+                    me.guard = (4, a.p);
+                    format!("{nm} {verb} {an} → -{}% damage taken", a.p)
+                }
+                Util => String::new(),
+            }
+        }
+    };
+    format!("{pre}{body}")
+}
+
+fn tick(s: &mut Side) {
+    if s.buff.0 > 0 { s.buff.0 -= 1; }
+    if s.guard.0 > 0 { s.guard.0 -= 1; }
+}
+
+fn end_round(s: &mut Side) {
+    s.mana = (s.mana + s.st.mana * 5 / 100).min(s.st.mana);
+    s.sta = (s.sta + s.st.sta * 5 / 100).min(s.st.sta);
+    s.hp = (s.hp + s.st.heal as i64).min(s.st.hp as i64);
+}
+
+fn fight(a: &Fighter, b: &Fighter) -> Duel {
+    let (mut sa, mut sb) = (Side::new(a), Side::new(b));
+    let mut lines = vec![];
+    let mut result: Option<bool> = None;
+    for r in 1..=40 {
+        let ta = turn(a, b, &mut sa, &mut sb);
+        tick(&mut sa);
+        let mut line = format!("R{r}: {ta}");
+        if sa.hp <= 0 { lines.push(line); result = Some(false); break; }
+        if sb.hp <= 0 { lines.push(line); result = Some(true); break; }
+        let tb = turn(b, a, &mut sb, &mut sa);
+        tick(&mut sb);
+        line += &format!(" | {tb}");
+        lines.push(line);
+        if sa.hp <= 0 { result = Some(false); break; }
+        if sb.hp <= 0 { result = Some(true); break; }
+        end_round(&mut sa);
+        end_round(&mut sb);
+    }
+    let won = result.unwrap_or_else(|| sa.hp * 1000 / sa.st.hp as i64 >= sb.hp * 1000 / sb.st.hp as i64);
+    Duel { won, lines, hp: sa.hp.max(0) as u32, mana: sa.mana, sta: sa.sta }
 }
 
 fn gen_player(near: u32) -> Fighter {
@@ -1251,11 +1910,9 @@ fn gen_player(near: u32) -> Fighter {
     let class = rnd(CLASSES.len() as u32) as usize;
     let spec = rnd(CLASSES[class].specs.len() as u32) as usize;
     let gear = build_gear(class, spec, level);
-    let n = 1 + rnd((level / 2).clamp(1, 5)) as usize;
     Fighter {
         name: player_name(), faction: faction.into(), race: pick(&pool).to_string(), class, spec, level, gear,
-        abilities: CLASSES[class].abilities[..n].iter().map(|s| s.to_string()).collect(),
-        talents: rnd(level / 3 + 1),
+        talents: rnd(level / 3 + 1), cur: None,
     }
 }
 
@@ -1266,27 +1923,36 @@ fn save_path() -> PathBuf {
     d.join("characters.json")
 }
 
-/// Convert gear saved by the old 6-slot system into the new equipment system.
+/// Upgrade old saves: old gear system, kill-quest steps, resource bars.
 fn migrate(s: &mut Save) {
     let map: [usize; 6] = [0, 1, 2, 6, S_MAIN, 12];
     for h in &mut s.heroes {
-        if h.gear.len() == SLOTS.len() { continue; }
-        let old = std::mem::take(&mut h.gear);
-        h.gear = vec![None; SLOTS.len()];
-        let class = h.class.min(CLASSES.len() - 1);
-        let spec = h.spec.min(CLASSES[class].specs.len() - 1);
-        for (i, it) in old.into_iter().enumerate() {
-            let (Some(it), Some(&cat)) = (it, map.get(i)) else { continue };
-            let q = [0usize, 2, 3, 4][it.quality.min(3)];
-            if let Some(mut n) = make_item(class, spec, h.level, cat, q) {
-                n.ilvl = it.ilvl.max(1);
-                h.gear[cat] = Some(n);
+        for q in &mut h.quests {
+            if q.target.is_empty() { q.target = "Kobolds".into(); }
+            let (g, p) = (q.goal, q.progress);
+            if q.qk == QKind::Kill && q.steps.is_empty() && g > 0 {
+                q.steps = (0..g).map(|i| Step { text: String::new(), done: i < p }).collect();
             }
         }
-        h.log.push(LogEntry {
-            time: now(), cat: "System".into(),
-            msg: "🔧 Old gear converted to the new equipment system.".into(),
-        });
+        if h.gear.len() != SLOTS.len() {
+            let old = std::mem::take(&mut h.gear);
+            h.gear = vec![None; SLOTS.len()];
+            let class = h.class.min(CLASSES.len() - 1);
+            let spec = h.spec.min(CLASSES[class].specs.len() - 1);
+            for (i, it) in old.into_iter().enumerate() {
+                let (Some(it), Some(&cat)) = (it, map.get(i)) else { continue };
+                let q = [0usize, 2, 3, 4][it.quality.min(3)];
+                if let Some(mut n) = make_item(class, spec, h.level, cat, q) {
+                    n.ilvl = it.ilvl.max(1);
+                    h.gear[cat] = Some(n);
+                }
+            }
+            h.log.push(LogEntry {
+                time: now(), cat: "System".into(),
+                msg: "🔧 Old gear converted to the new equipment system.".into(),
+            });
+        }
+        if h.hp == 0 { h.restore_all(); } else { h.clamp_res(); }
     }
 }
 
@@ -1324,6 +1990,17 @@ fn set_options(dd: &gtk::DropDown, items: &[String]) {
     dd.set_model(Some(&gtk::StringList::new(&refs)));
     dd.set_selected(if sel == gtk::INVALID_LIST_POSITION { 0 } else { sel.min(items.len() as u32 - 1) });
 }
+fn bar(class: &str) -> gtk::ProgressBar {
+    let b = gtk::ProgressBar::new();
+    b.set_show_text(true);
+    b.set_hexpand(true);
+    b.add_css_class(class);
+    b
+}
+fn set_bar(b: &gtk::ProgressBar, label: &str, cur: u32, max: u32) {
+    b.set_fraction((cur as f64 / max.max(1) as f64).min(1.0));
+    b.set_text(Some(&format!("{label} {cur} / {max}")));
+}
 
 struct Ui {
     save: RefCell<Save>,
@@ -1332,23 +2009,39 @@ struct Ui {
     realms: Vec<Realm>,
     zones: Vec<Zone>,
     opps: RefCell<Vec<Fighter>>,
+    store: RefCell<Vec<Item>>,
+    store_key: Cell<(usize, u32)>,
     stack: gtk::Stack,
     sel_list: gtk::Box,
     title: gtk::Label, xp_bar: gtk::ProgressBar, stats: gtk::Label,
+    hp_bar: gtk::ProgressBar, mana_bar: gtk::ProgressBar, sta_bar: gtk::ProgressBar,
+    pot_btn: [gtk::Button; 3],
     giver: gtk::Label, entry: gtk::Entry, goal: gtk::SpinButton,
     tier: gtk::DropDown, cat: gtk::DropDown, chain: gtk::CheckButton,
     qlist: gtk::Box, status: gtk::Label,
     zsearch: gtk::Entry, zkind: gtk::DropDown, zcount: gtk::Label, zlist: gtk::Box,
     pvp_head: gtk::Label, pvp_result: gtk::Label, pvp_list: gtk::Box,
     log_filter: gtk::DropDown, log_view: gtk::TextView,
-    sheet: gtk::Label,
+    sheet: gtk::Label, ab_list: gtk::Box,
     eq_sum: gtk::Label, eq_list: gtk::Box, bag_head: gtk::Label, bag_list: gtk::Box,
+    store_gold: gtk::Label, store_pots: gtk::Box, store_list: gtk::Box,
 }
 
 impl Ui {
     fn build(app: &gtk::Application) -> Rc<Self> {
         let ho = gtk::Orientation::Horizontal;
         let ve = gtk::Orientation::Vertical;
+
+        // ----- colours for the resource bars
+        let css = gtk::CssProvider::new();
+        css.load_from_data(
+            "progressbar.hp-bar progress { background: #c0392b; } \
+             progressbar.mana-bar progress { background: #2e86de; } \
+             progressbar.sta-bar progress { background: #d4a017; }",
+        );
+        if let Some(d) = gtk::gdk::Display::default() {
+            gtk::style_context_add_provider_for_display(&d, &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        }
 
         // ----- character select screen
         let sel_list = gtk::Box::new(ve, 8);
@@ -1373,14 +2066,23 @@ impl Ui {
         let head = gtk::Box::new(ho, 8);
         head.append(&title); head.append(&save_btn); head.append(&switch_btn);
         let xp_bar = gtk::ProgressBar::new(); xp_bar.set_show_text(true);
+        let hp_bar = bar("hp-bar");
+        let mana_bar = bar("mana-bar");
+        let sta_bar = bar("sta-bar");
+        let bars = gtk::Box::new(ho, 8);
+        bars.append(&hp_bar); bars.append(&mana_bar); bars.append(&sta_bar);
+        let pot_btn = [gtk::Button::new(), gtk::Button::new(), gtk::Button::new()];
+        let potrow = gtk::Box::new(ho, 8);
+        potrow.append(&gtk::Label::new(Some("Potions:")));
+        for b in &pot_btn { potrow.append(b); }
         let stats = gtk::Label::new(None); stats.set_xalign(0.0); stats.set_wrap(true);
 
         // ----- quests tab
         let giver = gtk::Label::new(None); giver.set_xalign(0.0);
         let entry = gtk::Entry::new(); entry.set_hexpand(true);
-        entry.set_placeholder_text(Some("e.g. Kobolds slain / Write report"));
-        let goal = gtk::SpinButton::with_range(1.0, 100.0, 1.0);
-        goal.set_tooltip_text(Some("How many steps: Kill 10 Kobolds = 10"));
+        entry.set_placeholder_text(Some("e.g. Write report / Clean the kitchen"));
+        let goal = gtk::SpinButton::with_range(1.0, MAX_QGOAL as f64, 1.0);
+        goal.set_tooltip_text(Some("Kill quests: how many mobs to kill — each kill becomes its own to-do line.\nGather quests ignore this: the amount (3-15) is rolled for you."));
         let tier = gtk::DropDown::from_strings(&["Normal"]);
         tier.set_tooltip_text(Some("Difficulty = how big the task is. Bigger tasks pay more XP, gold and loot and unlock as you level."));
         let cat = gtk::DropDown::from_strings(&["Adventure"]);
@@ -1392,14 +2094,15 @@ impl Ui {
         add_btn.set_valign(gtk::Align::End);
         let add_row = gtk::Box::new(ho, 8);
         add_row.append(&labeled("Quest", &entry));
-        add_row.append(&labeled("Steps", &goal));
+        add_row.append(&labeled("Kill count", &goal));
         add_row.append(&labeled("Difficulty", &tier));
         add_row.append(&labeled("Profession", &cat));
         add_row.append(&labeled("Chain", &chain));
         add_row.append(&add_btn);
         let hint = gtk::Label::new(Some(
-            "Difficulty = task size (Normal · Elite Lv5 · Dungeon Lv10 · Raid Lv20 · World Boss Lv40; more XP/loot). \
-             Profession = task type (levels a gathering/crafting skill, unlocks Lv5). Chain = spawns a harder follow-up.",
+            "Each quest is randomly a KILL quest (kill X mobs — every kill is a line you fill in and mark done or abandon) \
+             or a GATHER quest (press ⚔ +1: you may or may not find the item; the amount, 3-15, is rolled for you, bigger hauls pay more). \
+             Every step has a chance to drop a health, mana or stamina potion.",
         ));
         hint.set_xalign(0.0); hint.set_wrap(true); hint.add_css_class("dim-label");
         let qlist = gtk::Box::new(ve, 6);
@@ -1416,6 +2119,7 @@ impl Ui {
         zsearch.set_placeholder_text(Some("Search zones…"));
         let zkind = gtk::DropDown::from_strings(&ZONE_KINDS);
         let zcount = gtk::Label::new(None); zcount.set_xalign(0.0); zcount.add_css_class("dim-label");
+        zcount.set_wrap(true);
         let zlist = gtk::Box::new(ve, 4);
         let zscroll = gtk::ScrolledWindow::builder().vexpand(true).child(&zlist).build();
         let zrow = gtk::Box::new(ho, 8);
@@ -1455,6 +2159,27 @@ impl Ui {
         eq_inner.append(&eq_list); eq_inner.append(&bag_row); eq_inner.append(&bag_list);
         let eq_scroll = gtk::ScrolledWindow::builder().vexpand(true).child(&eq_inner).build();
 
+        // ----- store tab
+        let store_gold = gtk::Label::new(None); store_gold.set_xalign(0.0);
+        let store_hint = gtk::Label::new(Some(
+            "Stock is generated around your level and usable by your class. Bought gear goes to your bag — equip it from the Equipment tab. \
+             ▲ marks an upgrade over what you wear.",
+        ));
+        store_hint.set_xalign(0.0); store_hint.set_wrap(true); store_hint.add_css_class("dim-label");
+        let pot_title = gtk::Label::new(None); pot_title.set_markup("<b>Potions</b>"); pot_title.set_xalign(0.0);
+        let store_pots = gtk::Box::new(ve, 4);
+        let st_title = gtk::Label::new(None); st_title.set_markup("<b>Equipment for sale</b>");
+        st_title.set_xalign(0.0); st_title.set_hexpand(true);
+        let restock = gtk::Button::with_label("🔄 Restock");
+        let st_row = gtk::Box::new(ho, 8);
+        st_row.append(&st_title); st_row.append(&restock);
+        let store_list = gtk::Box::new(ve, 4);
+        let store_inner = gtk::Box::new(ve, 8);
+        pad(&store_inner, 10);
+        store_inner.append(&store_gold); store_inner.append(&store_hint); store_inner.append(&pot_title);
+        store_inner.append(&store_pots); store_inner.append(&st_row); store_inner.append(&store_list);
+        let store_scroll = gtk::ScrolledWindow::builder().vexpand(true).child(&store_inner).build();
+
         // ----- logs tab
         let log_filter = gtk::DropDown::from_strings(&LOG_FILTERS);
         let log_clear = gtk::Button::with_label("Clear logs");
@@ -1471,10 +2196,13 @@ impl Ui {
         pad(&logs_page, 10);
         logs_page.append(&lrow); logs_page.append(&lscroll);
 
-        // ----- character tab
+        // ----- character tab (stats + abilities)
         let sheet = gtk::Label::new(None); sheet.set_xalign(0.0); sheet.set_yalign(0.0); sheet.set_wrap(true);
-        pad(&sheet, 10);
-        let sheet_scroll = gtk::ScrolledWindow::builder().vexpand(true).child(&sheet).build();
+        let ab_list = gtk::Box::new(ve, 6);
+        let sheet_box = gtk::Box::new(ve, 10);
+        pad(&sheet_box, 10);
+        sheet_box.append(&sheet); sheet_box.append(&ab_list);
+        let sheet_scroll = gtk::ScrolledWindow::builder().vexpand(true).child(&sheet_box).build();
 
         let nb = gtk::Notebook::new();
         nb.set_vexpand(true);
@@ -1482,26 +2210,30 @@ impl Ui {
         nb.append_page(&zones_page, Some(&gtk::Label::new(Some("🗺 Zones"))));
         nb.append_page(&pvp_page, Some(&gtk::Label::new(Some("⚔ Realm PvP"))));
         nb.append_page(&eq_scroll, Some(&gtk::Label::new(Some("🎒 Equipment"))));
+        nb.append_page(&store_scroll, Some(&gtk::Label::new(Some("🏪 Store"))));
         nb.append_page(&sheet_scroll, Some(&gtk::Label::new(Some("🧙 Character"))));
         nb.append_page(&logs_page, Some(&gtk::Label::new(Some("📋 Logs"))));
 
         let game = gtk::Box::new(ve, 10);
         pad(&game, 12);
-        game.append(&head); game.append(&xp_bar); game.append(&stats); game.append(&nb);
+        game.append(&head); game.append(&xp_bar); game.append(&bars); game.append(&potrow);
+        game.append(&stats); game.append(&nb);
 
         let stack = gtk::Stack::new();
         stack.add_named(&select, Some("select"));
         stack.add_named(&game, Some("game"));
         let win = gtk::ApplicationWindow::builder().application(app)
-            .title(APP_TITLE).default_width(960).default_height(840).build();
+            .title(APP_TITLE).default_width(1000).default_height(900).build();
         win.set_child(Some(&stack));
 
         let ui = Rc::new(Ui {
             save: RefCell::new(load()), active: Cell::new(None), confirm_del: Cell::new(None),
             realms: make_realms(), zones: load_zones(), opps: RefCell::new(vec![]),
-            stack, sel_list, title, xp_bar, stats, giver, entry, goal, tier, cat, chain, qlist, status,
-            zsearch, zkind, zcount, zlist, pvp_head, pvp_result, pvp_list, log_filter, log_view, sheet,
-            eq_sum, eq_list, bag_head, bag_list,
+            store: RefCell::new(vec![]), store_key: Cell::new((usize::MAX, 0)),
+            stack, sel_list, title, xp_bar, stats, hp_bar, mana_bar, sta_bar, pot_btn,
+            giver, entry, goal, tier, cat, chain, qlist, status,
+            zsearch, zkind, zcount, zlist, pvp_head, pvp_result, pvp_list, log_filter, log_view, sheet, ab_list,
+            eq_sum, eq_list, bag_head, bag_list, store_gold, store_pots, store_list,
         });
 
         { let u = ui.clone(); sel_new.connect_clicked(move |_| u.show_create()); }
@@ -1512,9 +2244,14 @@ impl Ui {
         { let u = ui.clone(); pvp_refresh.connect_clicked(move |_| u.new_opponents()); }
         { let u = ui.clone(); log_clear.connect_clicked(move |_| u.clear_logs()); }
         { let u = ui.clone(); sell_junk.connect_clicked(move |_| u.sell_junk()); }
+        { let u = ui.clone(); restock.connect_clicked(move |_| u.restock()); }
         { let u = ui.clone(); ui.zsearch.connect_changed(move |_| u.refresh_zones()); }
         { let u = ui.clone(); ui.zkind.connect_selected_notify(move |_| u.refresh_zones()); }
         { let u = ui.clone(); ui.log_filter.connect_selected_notify(move |_| u.refresh_logs()); }
+        for (k, b) in ui.pot_btn.iter().enumerate() {
+            let u = ui.clone();
+            b.connect_clicked(move |_| u.drink(k));
+        }
 
         win.present();
         ui
@@ -1531,6 +2268,7 @@ impl Ui {
         persist(&self.save.borrow());
         self.active.set(None);
         self.confirm_del.set(None);
+        self.store_key.set((usize::MAX, 0));
         self.refresh_select();
         self.stack.set_visible_child_name("select");
     }
@@ -1583,6 +2321,7 @@ impl Ui {
 
     fn enter(self: &Rc<Self>, i: usize) {
         self.confirm_del.set(None);
+        self.store_key.set((usize::MAX, 0));
         let (realm, pop) = {
             let s = self.save.borrow();
             let Some(h) = s.heroes.get(i) else { return };
@@ -1596,7 +2335,10 @@ impl Ui {
 
     fn finish(self: &Rc<Self>, msgs: Vec<Msg>) {
         if let Some(a) = self.active.get() {
-            if let Some(h) = self.save.borrow_mut().heroes.get_mut(a) { h.add_log(msgs); }
+            if let Some(h) = self.save.borrow_mut().heroes.get_mut(a) {
+                h.clamp_res();
+                h.add_log(msgs);
+            }
         }
         persist(&self.save.borrow());
         self.refresh();
@@ -1629,9 +2371,16 @@ impl Ui {
 
             self.xp_bar.set_fraction((h.xp as f64 / h.need() as f64).min(1.0));
             self.xp_bar.set_text(Some(&format!("{} / {} XP", h.xp, h.need())));
-            let ab = if h.abilities.is_empty() { "—".to_string() } else { h.abilities.join(", ") };
-            self.stats.set_text(&format!(
-                "💰 {} gold   ✨ Talents: {}   🎖 Honor: {}   📖 Abilities: {}", h.gold, h.talents, h.honor, ab));
+            set_bar(&self.hp_bar, "❤ HP", h.hp, st.hp);
+            set_bar(&self.mana_bar, "🔷 Mana", h.mana, st.mana);
+            set_bar(&self.sta_bar, "⚡ Stamina", h.sta, st.sta);
+            for k in 0..3 {
+                let short = POT[k].0.split(' ').next().unwrap_or("");
+                self.pot_btn[k].set_label(&format!("{} {} ×{}", POT[k].1, short, h.pots[k]));
+                self.pot_btn[k].set_sensitive(h.pots[k] > 0);
+                self.pot_btn[k].set_tooltip_text(Some(&format!("Drink a {}: restores {POT_PCT}% of the bar", POT[k].0)));
+            }
+            self.stats.set_text(&format!("💰 {} gold   ✨ Talents: {}   🎖 Honor: {}", h.gold, h.talents, h.honor));
 
             self.giver.set_text(&format!("Find an NPC in {} and accept a quest:", h.zone));
             let tl: Vec<String> = Tier::ALL.iter().map(|t| {
@@ -1657,11 +2406,13 @@ impl Ui {
 
             let pop = self.realms.get(h.realm_tier).map_or(0, |r| r.pop);
             self.pvp_head.set_text(&format!(
-                "🌐 Realm {} — {} players online (showing {} nearby)\nYou: Lv {} · HP {} · ATK {} · DEF {} · Crit {}% · Heal {}/round · {}W-{}L · {} honor",
-                h.realm, commas(pop), PVP_SHOWN, h.level, st.hp, st.atk, st.def, st.crit, st.heal, h.wins, h.losses, h.honor));
+                "🌐 Realm {} — {} players online (showing {} nearby, lowest level first)\nYou: Lv {} · HP {}/{} · Mana {}/{} · Stamina {}/{} · ATK {} · DEF {} · Crit {}% · {}W-{}L · {} honor",
+                h.realm, commas(pop), PVP_SHOWN, h.level, h.hp, st.hp, h.mana, st.mana, h.sta, st.sta,
+                st.atk, st.def, st.crit, h.wins, h.losses, h.honor));
 
             let mut t = String::from("<b>Combat stats</b>\n");
-            t += &format!("HP {} · ATK {} · DEF {} · Crit {}% · Heal {}/round · avg ilvl {}\n", st.hp, st.atk, st.def, st.crit, st.heal, f.ilvl_avg());
+            t += &format!("HP {}/{} · Mana {}/{} · Stamina {}/{}\n", h.hp, st.hp, h.mana, st.mana, h.sta, st.sta);
+            t += &format!("ATK {} · DEF {} · Crit {}% · Regen {}/round · avg ilvl {}\n", st.atk, st.def, st.crit, st.heal, f.ilvl_avg());
             t += &format!("{} armor · {} · {} (see the Equipment tab)\n\n", c.armor, role.name(), f.setup());
             t += "<b>Professions</b>\n";
             let profs: Vec<String> = h.prof.iter().enumerate().filter(|(_, p)| **p > 0)
@@ -1670,10 +2421,42 @@ impl Ui {
             t += "\n\n<b>Achievements</b>\n";
             t += &if h.achievements.is_empty() { "—".to_string() } else { h.achievements.join("\n") };
             self.sheet.set_markup(&t);
+            self.refresh_abilities(h, &st);
         }
         self.refresh_equipment();
+        self.refresh_store();
         self.refresh_zones();
         self.refresh_logs();
+    }
+
+    fn refresh_abilities(&self, h: &Hero, st: &Stats) {
+        while let Some(c) = self.ab_list.first_child() { self.ab_list.remove(&c); }
+        let cls = &CLASSES[h.class];
+        let spec_name = cls.specs[h.spec].0;
+        let (have, locked): (Vec<&Ab>, Vec<&Ab>) = cls.abilities.iter()
+            .filter(|a| spec_ok(a, spec_name))
+            .partition(|a| a.l <= h.level);
+        let head = gtk::Label::new(None);
+        head.set_xalign(0.0);
+        head.set_markup(&format!("<b>Abilities</b> — {} learned (damage/heal numbers use your current stats)", have.len()));
+        self.ab_list.append(&head);
+        for a in have {
+            let lbl = gtk::Label::new(None);
+            lbl.set_xalign(0.0); lbl.set_wrap(true);
+            lbl.set_markup(&format!(
+                "<span foreground='{}'><b>{}</b></span>  <small>Lv {} · {}</small>\n<small>{}</small>",
+                kcol(a.k), esc(aname(a, &h.faction)), a.l, kname(a.k), esc(&ab_effect(a, st))));
+            pad(&lbl, 6);
+            let fr = gtk::Frame::new(None);
+            fr.set_child(Some(&lbl));
+            self.ab_list.append(&fr);
+        }
+        if !locked.is_empty() {
+            let txt: Vec<String> = locked.iter().map(|a| format!("Lv {} {}", a.l, aname(a, &h.faction))).collect();
+            let l = gtk::Label::new(Some(&format!("🔒 Upcoming: {}", txt.join(" · "))));
+            l.set_xalign(0.0); l.set_wrap(true); l.add_css_class("dim-label");
+            self.ab_list.append(&l);
+        }
     }
 
     fn refresh_equipment(self: &Rc<Self>) {
@@ -1748,6 +2531,127 @@ impl Ui {
             row.append(&lbl); row.append(&eq); row.append(&sell);
             self.bag_list.append(&row);
         }
+    }
+
+    // ----- store
+    fn refresh_store(self: &Rc<Self>) {
+        while let Some(c) = self.store_pots.first_child() { self.store_pots.remove(&c); }
+        while let Some(c) = self.store_list.first_child() { self.store_list.remove(&c); }
+        let Some(a) = self.active.get() else { return };
+        let s = self.save.borrow();
+        let Some(h) = s.heroes.get(a) else { return };
+        if self.store_key.get() != (a, h.level) {
+            *self.store.borrow_mut() = gen_store(h.class, h.spec, h.level);
+            self.store_key.set((a, h.level));
+        }
+        self.store_gold.set_text(&format!("💰 You have {} gold · bag {}/{}", h.gold, h.bag.len(), BAG_MAX));
+
+        let pp = potion_price(h.level);
+        for k in 0..3 {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let lbl = gtk::Label::new(Some(&format!(
+                "{} {} — restores {POT_PCT}% · you have {}", POT[k].1, POT[k].0, h.pots[k])));
+            lbl.set_xalign(0.0); lbl.set_hexpand(true);
+            let b = gtk::Button::with_label(&format!("Buy {pp}g"));
+            b.set_sensitive(h.gold >= pp);
+            { let u = self.clone(); b.connect_clicked(move |_| u.buy_potion(k)); }
+            row.append(&lbl); row.append(&b);
+            self.store_pots.append(&row);
+        }
+
+        let stock = self.store.borrow();
+        if stock.is_empty() { self.store_list.append(&gtk::Label::new(Some("Sold out — press Restock."))); }
+        for (i, it) in stock.iter().enumerate() {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let lbl = gtk::Label::new(None);
+            lbl.set_xalign(0.0); lbl.set_hexpand(true);
+            let tl = it.type_label();
+            let si = it.stats_inline();
+            let up = if h.is_upgrade(it) { "<span foreground='#3fb950'>▲</span> " } else { "" };
+            lbl.set_markup(&format!(
+                "{up}{}\n<small>ilvl {} · {} · {}</small>",
+                qspan(it.quality, it.name.as_str()), it.ilvl,
+                glib::markup_escape_text(tl.as_str()), glib::markup_escape_text(si.as_str())));
+            lbl.set_tooltip_text(Some(&it.tip()));
+            let price = it.buy_price();
+            let b = gtk::Button::with_label(&format!("Buy {price}g"));
+            b.set_valign(gtk::Align::Center);
+            b.set_sensitive(h.gold >= price);
+            { let u = self.clone(); b.connect_clicked(move |_| u.buy(i)); }
+            row.append(&lbl); row.append(&b);
+            self.store_list.append(&row);
+        }
+    }
+
+    fn restock(self: &Rc<Self>) {
+        self.store_key.set((usize::MAX, 0));
+        self.refresh_store();
+    }
+
+    fn buy(self: &Rc<Self>, i: usize) {
+        let Some(a) = self.active.get() else { return };
+        let it = {
+            let st = self.store.borrow();
+            match st.get(i) { Some(x) => x.clone(), None => return }
+        };
+        let price = it.buy_price();
+        let mut msgs: Vec<Msg> = vec![];
+        {
+            let mut s = self.save.borrow_mut();
+            let Some(h) = s.heroes.get_mut(a) else { return };
+            if h.gold < price {
+                msgs.push(m("System", format!("💸 Not enough gold — {} costs {price}g.", it.name)));
+            } else if h.bag.len() >= BAG_MAX {
+                msgs.push(m("Loot", "🎒 Bag is full — sell something first."));
+            } else {
+                h.gold -= price;
+                msgs.push(m("Loot", format!("🛒 Bought {} for {price} gold", it.label())));
+                h.bag.push(it);
+                self.store.borrow_mut().remove(i);
+            }
+        }
+        self.finish(msgs);
+    }
+
+    fn buy_potion(self: &Rc<Self>, k: usize) {
+        let Some(a) = self.active.get() else { return };
+        let mut msgs: Vec<Msg> = vec![];
+        {
+            let mut s = self.save.borrow_mut();
+            let Some(h) = s.heroes.get_mut(a) else { return };
+            let price = potion_price(h.level);
+            if h.gold < price {
+                msgs.push(m("System", format!("💸 Not enough gold — a {} costs {price}g.", POT[k].0)));
+            } else {
+                h.gold -= price;
+                h.pots[k] += 1;
+                msgs.push(m("Loot", format!("🛒 Bought a {} for {price} gold", POT[k].0)));
+            }
+        }
+        self.finish(msgs);
+    }
+
+    fn drink(self: &Rc<Self>, k: usize) {
+        let Some(a) = self.active.get() else { return };
+        let mut msgs: Vec<Msg> = vec![];
+        {
+            let mut s = self.save.borrow_mut();
+            let Some(h) = s.heroes.get_mut(a) else { return };
+            let mx = h.maxes();
+            let max = [mx.0, mx.1, mx.2][k];
+            let cur = [h.hp, h.mana, h.sta][k];
+            if h.pots[k] == 0 {
+                msgs.push(m("System", format!("You have no {}.", POT[k].0)));
+            } else if cur >= max {
+                msgs.push(m("System", "That bar is already full."));
+            } else {
+                let newv = (cur + max * POT_PCT / 100).min(max);
+                match k { 0 => h.hp = newv, 1 => h.mana = newv, _ => h.sta = newv }
+                h.pots[k] -= 1;
+                msgs.push(m("Loot", format!("{} Drank a {}: +{}", POT[k].1, POT[k].0, newv - cur)));
+            }
+        }
+        self.finish(msgs);
     }
 
     fn equip(self: &Rc<Self>, i: usize) {
@@ -1848,14 +2752,21 @@ impl Ui {
         let Some(h) = s.heroes.get(a) else { return };
         let q = self.zsearch.text().to_lowercase();
         let kind = self.zkind.selected();
-        let open: Vec<&Zone> = self.zones.iter()
+        let mut open: Vec<&Zone> = self.zones.iter()
             .filter(|z| z.open_to(&h.faction, h.level) && z.matches_kind(kind)
                         && (q.is_empty() || z.name.to_lowercase().contains(&q)))
             .collect();
+        let total = open.len();
+        // keep the zones closest to the hero's level, then list them lowest level first
+        let lvl = h.level;
+        let dist = |z: &Zone| if lvl > z.hi { lvl - z.hi } else { 0 };
+        open.sort_by_key(|z| (dist(z), lvl - z.lo, z.name.clone()));
+        open.truncate(ZONE_ROWS);
+        open.sort_by(|x, y| (x.lo, &x.name).cmp(&(y.lo, &y.name)));
         self.zcount.set_text(&format!(
-            "{} of {} zones available to you (level {}, {}) — showing {}. Dungeon zones: +25% rewards, Raid zones: +50%.",
-            open.len(), self.zones.len(), h.level, h.faction, open.len().min(ZONE_ROWS)));
-        for z in open.iter().take(ZONE_ROWS) {
+            "{} of {} zones available to you (level {}, {}) — showing the {} closest to your level, lowest first. Dungeon zones: +25% rewards, Raid zones: +50%.",
+            total, self.zones.len(), h.level, h.faction, open.len()));
+        for z in open.iter() {
             let fr = gtk::Frame::new(None);
             fr.set_child(Some(&self.zone_row(z, h)));
             self.zlist.append(&fr);
@@ -1897,32 +2808,133 @@ impl Ui {
         self.finish(vec![m("Travel", format!("🗺 Traveled to {} ({kind}){extra}", z.name))]);
     }
 
+    // ----- quests
     fn quest_row(self: &Rc<Self>, i: usize, q: &Quest) -> gtk::Box {
+        let outer = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        pad(&outer, 8);
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        pad(&row, 8);
         let info = gtk::Box::new(gtk::Orientation::Vertical, 4);
         info.set_hexpand(true);
         let t = gtk::Label::new(None);
         t.set_xalign(0.0);
         t.set_markup(&format!("<b>{}</b>", glib::markup_escape_text(q.display().as_str())));
-        let sub = gtk::Label::new(Some(&format!("{} · {} · 📍 {} · from {}", q.tier.name(), CATS[q.cat], q.zone, q.giver)));
+        let kind_txt = match q.qk { QKind::Kill => "⚔ Kill quest", QKind::Gather => "🌿 Gather quest" };
+        let sub = gtk::Label::new(Some(&format!(
+            "{} · {} · {} · 📍 {} · from {}", kind_txt, q.tier.name(), CATS[q.cat], q.zone, q.giver)));
         sub.set_xalign(0.0); sub.add_css_class("dim-label");
         let bar = gtk::ProgressBar::new();
         bar.set_show_text(true);
-        bar.set_fraction(q.progress as f64 / q.goal as f64);
-        bar.set_text(Some(&format!("{}/{}", q.progress, q.goal)));
+        bar.set_fraction((q.progress as f64 / q.goal.max(1) as f64).min(1.0));
+        let btxt = match q.qk {
+            QKind::Kill => format!("{}/{} kills", q.progress, q.goal),
+            QKind::Gather => format!("{}/{} gathered · {} attempts", q.progress, q.goal, q.tries),
+        };
+        bar.set_text(Some(&btxt));
         info.append(&t); info.append(&sub); info.append(&bar);
 
         let done = q.progress >= q.goal;
         let act = gtk::Button::with_label(if done { "Turn in" } else { "⚔ +1" });
         if done { act.add_css_class("suggested-action"); }
+        if q.qk == QKind::Kill && !done {
+            act.set_label("Turn in");
+            act.set_sensitive(false);
+            act.set_tooltip_text(Some("Finish every kill below first."));
+        }
         act.set_valign(gtk::Align::Center);
         { let u = self.clone(); act.connect_clicked(move |_| u.act(i)); }
         let del = gtk::Button::with_label("Abandon");
         del.set_valign(gtk::Align::Center);
         { let u = self.clone(); del.connect_clicked(move |_| u.abandon(i)); }
         row.append(&info); row.append(&act); row.append(&del);
+        outer.append(&row);
+        if q.qk == QKind::Kill {
+            for (si, s) in q.steps.iter().enumerate() {
+                outer.append(&self.step_row(i, si, s));
+            }
+        }
+        outer
+    }
+
+    fn step_row(self: &Rc<Self>, qi: usize, si: usize, s: &Step) -> gtk::Box {
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row.set_margin_start(12);
+        let e = gtk::Entry::new();
+        e.set_hexpand(true);
+        e.set_placeholder_text(Some(&format!("Kill {} — what is this task?", si + 1)));
+        e.set_text(&s.text);
+        if s.done { e.set_sensitive(false); }
+        { let u = self.clone(); e.connect_changed(move |en| u.edit_step(qi, si, en.text().to_string())); }
+        row.append(&e);
+        if s.done {
+            row.append(&gtk::Label::new(Some("✔ done")));
+        } else {
+            let ok = gtk::Button::with_label("✔ Complete");
+            { let u = self.clone(); ok.connect_clicked(move |_| u.step_done(qi, si)); }
+            let no = gtk::Button::with_label("✖ Abandon");
+            { let u = self.clone(); no.connect_clicked(move |_| u.step_abandon(qi, si)); }
+            row.append(&ok); row.append(&no);
+        }
         row
+    }
+
+    fn edit_step(self: &Rc<Self>, qi: usize, si: usize, text: String) {
+        let Some(a) = self.active.get() else { return };
+        let mut s = self.save.borrow_mut();
+        if let Some(st) = s.heroes.get_mut(a)
+            .and_then(|h| h.quests.get_mut(qi))
+            .and_then(|q| q.steps.get_mut(si))
+        {
+            st.text = text;
+        }
+        persist(&s);
+    }
+
+    fn step_done(self: &Rc<Self>, qi: usize, si: usize) {
+        let Some(a) = self.active.get() else { return };
+        let mut msgs: Vec<Msg> = vec![];
+        {
+            let mut s = self.save.borrow_mut();
+            let Some(h) = s.heroes.get_mut(a) else { return };
+            let Some(q) = h.quests.get_mut(qi) else { return };
+            if si >= q.steps.len() || q.steps[si].done { return; }
+            q.steps[si].done = true;
+            q.progress += 1;
+            let txt = q.steps[si].text.trim().to_string();
+            let label = if txt.is_empty() { format!("target {}", si + 1) } else { txt };
+            let (prog, goal, giver, disp) = (q.progress, q.goal, q.giver.clone(), q.display());
+            msgs.push(m("Quest", format!("✔ {disp}: {label} — {prog}/{goal} kills")));
+            if prog >= goal {
+                msgs.push(m("Quest", format!("Objective complete! Return to {giver} and turn in the quest.")));
+            }
+            h.step_drop(&mut msgs, STEP_DROP);
+            h.regen(4);
+        }
+        self.finish(msgs);
+    }
+
+    fn step_abandon(self: &Rc<Self>, qi: usize, si: usize) {
+        let Some(a) = self.active.get() else { return };
+        let mut msgs: Vec<Msg> = vec![];
+        {
+            let mut s = self.save.borrow_mut();
+            let Some(h) = s.heroes.get_mut(a) else { return };
+            let Some(q) = h.quests.get_mut(qi) else { return };
+            if si >= q.steps.len() { return; }
+            let st = q.steps.remove(si);
+            if st.done { q.progress = q.progress.saturating_sub(1); }
+            q.goal = q.steps.len() as u32;
+            let (empty, prog, goal, giver) = (q.goal == 0, q.progress, q.goal, q.giver.clone());
+            if empty {
+                h.quests.remove(qi);
+                msgs.push(m("Quest", "✖ Last target abandoned — quest removed."));
+            } else {
+                msgs.push(m("Quest", format!("✖ Target {} abandoned ({prog}/{goal} kills left to do)", si + 1)));
+                if prog >= goal {
+                    msgs.push(m("Quest", format!("Objective complete! Return to {giver} and turn in the quest.")));
+                }
+            }
+        }
+        self.finish(msgs);
     }
 
     fn add_quest(self: &Rc<Self>) {
@@ -1940,10 +2952,19 @@ impl Ui {
                 Err(format!("🔒 Professions unlock at level {PROF_LEVEL}."))
             } else {
                 let giver = pick(&npcs(&h.faction)).to_string();
+                let qk = if rnd(2) == 0 { QKind::Kill } else { QKind::Gather };
+                let (goal, target, steps) = match qk {
+                    QKind::Kill => {
+                        let g = (self.goal.value() as u32).clamp(1, MAX_QGOAL);
+                        (g, ps(MOBS).to_string(), make_steps(g))
+                    }
+                    QKind::Gather => (3 + rnd(MAX_QGOAL - 2), gather_item(ci), vec![]),
+                };
                 let q = Quest {
-                    title, giver: giver.clone(), tier, cat: ci, goal: self.goal.value() as u32, progress: 0,
+                    title, giver: giver.clone(), tier, cat: ci, goal, progress: 0,
                     chain: self.chain.is_active(), part: 1,
                     zone: h.zone.clone(), bonus: inst_bonus(&h.zone_inst),
+                    qk, target, steps, tries: 0,
                 };
                 let msg = m("Quest", format!("📜 {giver} ({}): \"{}\" — quest accepted!", q.zone, q.display()));
                 h.quests.push(q);
@@ -1960,25 +2981,41 @@ impl Ui {
         }
     }
 
+    /// Gather quests: ⚔ +1 tries to find the item. Any quest: turn in when complete.
     fn act(self: &Rc<Self>, i: usize) {
         let Some(a) = self.active.get() else { return };
         let msgs = {
             let mut s = self.save.borrow_mut();
             let Some(h) = s.heroes.get_mut(a) else { return };
             if i >= h.quests.len() { return; }
-            if h.quests[i].progress < h.quests[i].goal {
-                let q = &mut h.quests[i];
-                q.progress += 1;
-                let mut v = vec![m("Quest", format!("⚔ {} — {}/{}", q.display(), q.progress, q.goal))];
-                if q.progress == q.goal {
-                    v.push(m("Quest", format!("Objective complete! Return to {} and turn in the quest.", q.giver)));
+            let ready = h.quests[i].progress >= h.quests[i].goal;
+            if !ready {
+                if h.quests[i].qk != QKind::Gather { return; }
+                let got = rnd(100) < GATHER_CHANCE;
+                let (disp, p, g, tgt, giver) = {
+                    let q = &mut h.quests[i];
+                    q.tries += 1;
+                    if got { q.progress += 1; }
+                    (q.display(), q.progress, q.goal, q.target.clone(), q.giver.clone())
+                };
+                let mut v = vec![if got {
+                    m("Quest", format!("⚔ {disp} — found {tgt} ({p}/{g})"))
+                } else {
+                    m("Quest", format!("💨 {disp} — nothing this time ({p}/{g})"))
+                }];
+                if got && p >= g {
+                    v.push(m("Quest", format!("Objective complete! Return to {giver} and turn in the quest.")));
                 }
+                h.step_drop(&mut v, GATHER_DROP);
+                h.regen(4);
                 v
             } else {
                 let q = h.quests.remove(i);
                 let mut v = h.turn_in(&q);
                 if q.chain {
-                    let next = Quest { part: q.part + 1, goal: q.goal + (q.goal / 4).max(1), progress: 0, ..q.clone() };
+                    let g = (q.goal + (q.goal / 4).max(1)).min(MAX_QGOAL);
+                    let steps = if q.qk == QKind::Kill { make_steps(g) } else { vec![] };
+                    let next = Quest { part: q.part + 1, goal: g, progress: 0, steps, tries: 0, ..q.clone() };
                     v.push(m("Quest", format!("🔗 Quest chain continues: {}", next.display())));
                     h.quests.push(next);
                 }
@@ -2002,7 +3039,9 @@ impl Ui {
     fn new_opponents(self: &Rc<Self>) {
         let lvl = self.active.get()
             .and_then(|a| self.save.borrow().heroes.get(a).map(|h| h.level)).unwrap_or(1);
-        *self.opps.borrow_mut() = (0..PVP_SHOWN).map(|_| gen_player(lvl)).collect();
+        let mut v: Vec<Fighter> = (0..PVP_SHOWN).map(|_| gen_player(lvl)).collect();
+        v.sort_by_key(|f| f.level);
+        *self.opps.borrow_mut() = v;
         self.pvp_result.set_text("");
         self.refresh_pvp();
     }
@@ -2023,7 +3062,7 @@ impl Ui {
             sub.set_xalign(0.0); sub.add_css_class("dim-label");
             info.append(&name); info.append(&sub);
             let btn = gtk::Button::with_label("⚔");
-            btn.set_tooltip_text(Some("Duel this player with your current gear, abilities and stats"));
+            btn.set_tooltip_text(Some("Duel this player with your current gear, abilities, HP, mana and stamina"));
             btn.set_valign(gtk::Align::Center);
             { let u = self.clone(); btn.connect_clicked(move |_| u.duel(i)); }
             row.append(&info); row.append(&btn);
@@ -2042,18 +3081,27 @@ impl Ui {
         let (text, msgs) = {
             let mut s = self.save.borrow_mut();
             let Some(h) = s.heroes.get_mut(a) else { return };
-            let (won, lines) = fight(&h.fighter(), &opp);
-            let rounds = lines.len();
-            let mut msgs: Vec<Msg> = lines.into_iter().map(|l| m("PvP", l)).collect();
+            let me = h.fighter();
+            let d = fight(&me, &opp);
+            let rounds = d.lines.len();
+            let mut msgs: Vec<Msg> = vec![m("PvP", format!(
+                "⚔ Duel: {} (Lv {}, {}) vs {} (Lv {}, {})",
+                me.name, me.level, CLASSES[me.class].specs[me.spec].0,
+                opp.name, opp.level, CLASSES[opp.class].specs[opp.spec].0))];
+            msgs.extend(d.lines.into_iter().map(|l| m("PvP", l)));
+            h.mana = d.mana;
+            h.sta = d.sta;
             let text;
-            if won {
+            if d.won {
                 let honor = 10 + opp.level / 5;
                 let gold = opp.level * 2 + rnd(10);
+                h.hp = d.hp.max(1);
                 h.wins += 1; h.honor += honor; h.gold += gold;
                 text = format!("🏆 Victory vs {} (Lv {}) in {rounds} rounds: +{honor} honor, +{gold} gold", opp.name, opp.level);
             } else {
+                h.hp = (h.maxes().0 / 10).max(1);
                 h.losses += 1; h.honor += 1;
-                text = format!("💀 Defeat vs {} (Lv {}) after {rounds} rounds: +1 honor", opp.name, opp.level);
+                text = format!("💀 Defeat vs {} (Lv {}) after {rounds} rounds: +1 honor — you wake at 10% HP", opp.name, opp.level);
             }
             msgs.push(m("PvP", text.clone()));
             h.check_achievements(&mut msgs);
