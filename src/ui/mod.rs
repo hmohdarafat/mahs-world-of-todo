@@ -4,8 +4,7 @@ use std::{cell::{Cell, RefCell}, rc::Rc};
 use gtk::{glib, prelude::*};
 
 use crate::{
-    combat::*, config::*, data::{abilities::*, classes::*, items::*}, hero::*, items::*,
-    model::*, persistence::*, quests::*, utils::*, world::*,
+    config::*, data::items::QUALITY_GUIDE, model::*, persistence::*, utils::*, world::*,
 };
 
 mod common;

@@ -1,7 +1,6 @@
-use crate::model::{K::{Absorb, Buff, Dmg, Dot, Guard, Heal, Kick, Leech, Stun, Util}, R::{Free, Mana, Stam}, Role::{Healer, Melee, Ranged, Tank}, Wt::{Axe, Bow, Crossbow, Dagger, Fist, Gun, Mace, Polearm, Staff, Sword, Wand, Warglaive}};
 use std::rc::Rc;
-use gtk::{glib, prelude::*};
-use crate::{config::*, data::classes::*, hero::*, model::*, persistence::*, utils::*, world::*};
+use gtk::prelude::*;
+use crate::{config::*, data::classes::*, model::*, persistence::*, utils::*};
 use super::{common::labeled, Ui};
 
 pub(crate) fn create_screen(ui: &Rc<Ui>) -> gtk::Box {

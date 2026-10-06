@@ -1,8 +1,7 @@
-use std::{collections::HashSet, rc::Rc};
+use std::rc::Rc;
 use gtk::{glib, prelude::*};
-use crate::{config::*, data::classes::*, hero::*, items::*, model::*, persistence::*, quests::*, utils::*, world::*};
+use crate::{config::*, data::classes::*, model::*, persistence::*, quests::*, utils::*, world::*};
 use super::{Ui, pad};
-use crate::model::{K::{Absorb, Buff, Dmg, Dot, Guard, Heal, Kick, Leech, Stun, Util}, R::{Free, Mana, Stam}, Role::{Healer, Melee, Ranged, Tank}, Wt::{Axe, Bow, Crossbow, Dagger, Fist, Gun, Mace, Polearm, Staff, Sword, Wand, Warglaive}};
 
 impl Ui {
         pub(crate) fn quest_row(self: &Rc<Self>, i: usize, q: &Quest) -> gtk::Box {

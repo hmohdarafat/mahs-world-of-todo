@@ -1,6 +1,6 @@
 use gtk::glib;
 use crate::{config::*, data::{classes::*, items::*}, model::*, utils::*};
-use crate::model::{Role::{Healer, Melee, Ranged, Tank}, Wt::{Axe, Bow, Crossbow, Dagger, Fist, Gun, Mace, Polearm, Staff, Sword, Wand, Warglaive}};
+use crate::model::{Role::{Healer, Ranged, Tank}, Wt::{Axe, Bow, Crossbow, Dagger, Fist, Gun, Mace, Polearm, Staff, Sword, Wand, Warglaive}};
 
 pub(crate) fn qspan(q: usize, text: &str) -> String {
     let t = glib::markup_escape_text(text);

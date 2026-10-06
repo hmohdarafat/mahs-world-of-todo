@@ -1,6 +1,6 @@
 use gtk::glib;
 use std::path::PathBuf;
-use crate::{config::*, data::{classes::*, items::*}, items::make_item, model::*, utils::*};
+use crate::{data::{classes::*, items::*}, items::make_item, model::*, utils::*};
 
 // ---------- persistence ----------
 pub(crate) fn save_path() -> PathBuf {

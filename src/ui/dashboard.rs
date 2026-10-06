@@ -1,8 +1,7 @@
-use std::{collections::HashSet, rc::Rc};
+use std::rc::Rc;
 use gtk::{glib, prelude::*};
-use crate::{combat::*, config::*, data::{abilities::*, classes::*}, hero::*, model::*, persistence::*, quests::*, utils::*, world::*};
+use crate::{config::*, data::{abilities::*, classes::*}, model::*, persistence::*, utils::*};
 use super::{Ui, pad, set_bar, set_options};
-use crate::model::{K::{Absorb, Buff, Dmg, Dot, Guard, Heal, Kick, Leech, Stun, Util}, R::{Free, Mana, Stam}, Role::{Healer, Melee, Ranged, Tank}, Wt::{Axe, Bow, Crossbow, Dagger, Fist, Gun, Mace, Polearm, Staff, Sword, Wand, Warglaive}};
 
 impl Ui {
         pub(crate) fn finish(self: &Rc<Self>, msgs: Vec<Msg>) {

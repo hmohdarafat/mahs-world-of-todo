@@ -1,5 +1,4 @@
-use gtk::{glib, prelude::*};
-use crate::config::*;
+use gtk::prelude::*;
 
 pub(crate) fn pad(w: &impl IsA<gtk::Widget>, n: i32) {
     w.set_margin_top(n); w.set_margin_bottom(n); w.set_margin_start(n); w.set_margin_end(n);
