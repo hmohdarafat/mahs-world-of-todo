@@ -1,6 +1,7 @@
+
 use std::rc::Rc;
 use gtk::{glib, prelude::*};
-use crate::{config::*, data::{abilities::*, classes::*}, model::*, persistence::*, quests::*, utils::*};
+use crate::{config::*, data::{abilities::*, classes::*, items::SLOTS}, model::*, persistence::*, quests::*, utils::*};
 use super::{Ui, pad, set_bar, set_options};
 
 impl Ui {
@@ -92,10 +93,27 @@ impl Ui {
                     h.realm, commas(pop), shown, pvp_faction, h.level, h.hp, st.hp, h.mana, st.mana, h.sta, st.sta,
                     st.atk, st.def, st.crit, h.wins, h.losses, h.honor));
 
-                let mut t = String::from("<b>Combat stats</b>\n");
-                t += &format!("HP {}/{} · Mana {}/{} · Stamina {}/{}\n", h.hp, st.hp, h.mana, st.mana, h.sta, st.sta);
+                let mut t = String::new();
+                t += &format!("<b>Combat overview</b>\nHP {}/{} · Mana {}/{} · Stamina {}/{}\n", h.hp, st.hp, h.mana, st.mana, h.sta, st.sta);
                 t += &format!("ATK {} · DEF {} · Crit {}% · Regen {}/round · avg ilvl {}\n", st.atk, st.def, st.crit, st.heal, f.ilvl_avg());
-                t += &format!("{} armor · {} · {} (see the Equipment tab)\n\n", c.armor, role.name(), f.setup());
+                t += &format!("{} armor · {} · {}\n\n", c.armor, role.name(), f.setup());
+                t += &f.stat_breakdown();
+                t += "\n<b>Exact equipment contribution by slot</b>\n";
+                for (i, slot) in SLOTS.iter().enumerate() {
+                    match &h.gear[i] {
+                        Some(it) if it.kind != Kind::Cosmetic => {
+                            let impact = h.equipped_item_impact(i);
+                            let raw = it.stats_inline();
+                            t += &format!(
+                                "  {slot}: {} — {} — Final-stat contribution: {}\n",
+                                esc(it.name.as_str()), esc(&raw), esc(&impact)
+                            );
+                        }
+                        Some(it) => t += &format!("  {slot}: {} — cosmetic, no stat contribution\n", esc(it.name.as_str())),
+                        None => t += &format!("  {slot}: empty\n"),
+                    }
+                }
+                t += "\n";
                 t += "<b>Professions</b>\n";
                 let profs: Vec<String> = h.prof.iter().enumerate().filter(|(_, p)| **p > 0)
                     .map(|(i, p)| format!("{}: {}", CATS[i + 1], p)).collect();
@@ -142,3 +160,4 @@ impl Ui {
         }
 
 }
+

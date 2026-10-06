@@ -1,3 +1,4 @@
+
 use gtk::glib;
 use std::path::PathBuf;
 use crate::{config::MAX_LEVEL, data::{classes::*, items::*}, items::make_item, model::*, utils::*};
@@ -54,4 +55,5 @@ pub(crate) fn load() -> Save {
 pub(crate) fn persist(s: &Save) {
     if let Ok(j) = serde_json::to_string_pretty(s) { let _ = std::fs::write(save_path(), j); }
 }
+
 

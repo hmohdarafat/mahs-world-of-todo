@@ -1,3 +1,4 @@
+
 use std::rc::Rc;
 use gtk::{glib, prelude::*};
 use crate::{combat::*, config::*, data::{classes::*}, model::*, utils::*};
@@ -95,3 +96,4 @@ impl Ui {
             self.finish(msgs);
         }
     }
+

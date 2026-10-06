@@ -1,3 +1,4 @@
+
 use std::rc::Rc;
 use gtk::{glib, prelude::*};
 use crate::{config::*, model::*, utils::*, world::*};
@@ -79,3 +80,4 @@ impl Ui {
 
         // ----- quests
 }
+

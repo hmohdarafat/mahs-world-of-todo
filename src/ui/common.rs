@@ -1,3 +1,4 @@
+
 use gtk::prelude::*;
 
 pub(crate) fn pad(w: &impl IsA<gtk::Widget>, n: i32) {
@@ -34,4 +35,5 @@ pub(crate) fn set_bar(b: &gtk::ProgressBar, label: &str, cur: u32, max: u32) {
     b.set_fraction((cur as f64 / max.max(1) as f64).min(1.0));
     b.set_text(Some(&format!("{label} {cur} / {max}")));
 }
+
 

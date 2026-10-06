@@ -1,3 +1,4 @@
+
 //! Ability definitions and class/spec ability lookup helpers.
 
 use crate::{data::classes::CLASSES, model::*};
@@ -291,3 +292,4 @@ pub(crate) fn ab_effect(a: &Ab, st: &Stats) -> String {
     let cd = if a.cd >= 2 { format!(" · cooldown {} rounds", a.cd) } else { String::new() };
     format!("{eff} · cost {cost}{cd}")
 }
+

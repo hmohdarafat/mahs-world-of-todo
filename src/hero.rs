@@ -1,3 +1,4 @@
+
 use crate::{config::*, data::{abilities::*, classes::*, items::*}, items::*, model::*, utils::*};
 
 impl Hero {
@@ -92,6 +93,86 @@ impl Hero {
         if cands.is_empty() { return false; }
         let p = item_power(it, self.class, self.spec);
         cands.iter().any(|&s| self.gear[s].as_ref().map_or(true, |o| item_power(o, self.class, self.spec) < p))
+    }
+
+    fn stats_for_gear(&self, gear: Vec<Option<Item>>) -> Stats {
+        Fighter {
+            name: self.name.clone(),
+            faction: self.faction.clone(),
+            race: self.race.clone(),
+            class: self.class,
+            spec: self.spec,
+            level: self.level,
+            gear,
+            talents: self.talents,
+            cur: None,
+        }.stats()
+    }
+
+    fn stat_delta_text(before: Stats, after: Stats) -> String {
+        let delta = |a: u32, b: u32| -> i64 { b as i64 - a as i64 };
+        let parts = [
+            ("HP", delta(before.hp, after.hp)),
+            ("ATK", delta(before.atk, after.atk)),
+            ("DEF", delta(before.def, after.def)),
+            ("Crit", delta(before.crit, after.crit)),
+            ("Mana", delta(before.mana, after.mana)),
+            ("Stamina", delta(before.sta, after.sta)),
+            ("Heal", delta(before.heal, after.heal)),
+        ];
+        parts.iter()
+            .filter(|(_, v)| *v != 0)
+            .map(|(name, v)| if *name == "Crit" {
+                format!("{name} {v:+}%")
+            } else {
+                format!("{}{v:+}", name)
+            })
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+
+    /// Exact contribution of an equipped item to the character's current derived stats.
+    pub(crate) fn equipped_item_impact(&self, slot: usize) -> String {
+        let Some(it) = self.gear.get(slot).and_then(|x| x.as_ref()) else { return "No item equipped".to_string(); };
+        let before = self.fighter().stats();
+        let mut gear = self.gear.clone();
+        if it.is_two() {
+            gear[S_MAIN] = None;
+            gear[S_OFF] = None;
+        } else {
+            gear[slot] = None;
+        }
+        let after = self.stats_for_gear(gear);
+        let delta = Self::stat_delta_text(after, before);
+        if delta.is_empty() { "No derived-stat change".to_string() } else { delta }
+    }
+
+    /// Exact contribution of all equipped gear to the current derived stats.
+    pub(crate) fn equipped_gear_impact(&self) -> String {
+        let before = self.stats_for_gear(vec![None; SLOTS.len()]);
+        let after = self.fighter().stats();
+        let delta = Self::stat_delta_text(before, after);
+        if delta.is_empty() { "No derived-stat change".to_string() } else { delta }
+    }
+
+    /// Project the item's exact derived-stat change if the player equips it now.
+    pub(crate) fn bag_item_impact(&self, it: &Item) -> String {
+        let cands = candidates(it, self.class, self.two_now());
+        if cands.is_empty() { return "Not equippable by this class/setup".to_string(); }
+        let pw = |o: &Option<Item>| o.as_ref().map_or(-1i64, |i| item_power(i, self.class, self.spec) as i64);
+        let target = cands.iter().copied().min_by_key(|&slot| pw(&self.gear[slot])).unwrap_or(S_MAIN);
+        let before = self.fighter().stats();
+        let mut gear = self.gear.clone();
+        if it.is_two() {
+            gear[S_MAIN] = None;
+            gear[S_OFF] = None;
+        } else {
+            gear[target] = None;
+        }
+        gear[target] = Some(it.clone());
+        let after = self.stats_for_gear(gear);
+        let delta = Self::stat_delta_text(before, after);
+        if delta.is_empty() { "No derived-stat change".to_string() } else { delta }
     }
 
     pub(crate) fn stash(&mut self, it: Item, msgs: &mut Vec<Msg>) {
@@ -255,3 +336,4 @@ impl Hero {
 }
 
 // ---------- combat ----------
+

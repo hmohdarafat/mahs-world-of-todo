@@ -1,3 +1,4 @@
+
 use gtk::glib;
 use crate::{config::*, data::{classes::*, items::*}, model::*, utils::*};
 use crate::model::{Role::{Healer, Ranged, Tank}, Wt::{Axe, Bow, Crossbow, Dagger, Fist, Gun, Mace, Polearm, Staff, Sword, Wand, Warglaive}};
@@ -45,6 +46,42 @@ impl Item {
         self.stats.iter().map(|&(s, v)| format!("+{v} {}", STAT_NAMES[s.min(7)])).collect::<Vec<_>>().join(", ")
     }
 
+    /// Recover the named suffix for old saves that predate the explicit suffix field.
+    pub(crate) fn suffix_index(&self) -> Option<usize> {
+        self.suffix.or_else(|| {
+            SUFFIXES.iter().position(|(name, _)| self.name.ends_with(name))
+        })
+    }
+
+    pub(crate) fn affix_text(&self) -> String {
+        match self.suffix_index() {
+            Some(i) => format!("Suffix: {}", SUFFIXES[i].0),
+            None => "No stat-bearing named suffix".to_string(),
+        }
+    }
+
+    /// Explain exactly what each raw gear stat changes in the current class/spec.
+    pub(crate) fn stat_impact_text(&self, class: usize, spec: usize) -> String {
+        let prim = primary(class, CLASSES[class].specs[spec].1);
+        self.stats.iter().map(|&(s, v)| {
+            let effect = match s {
+                0 => format!("HP +{} · Stamina +{}", v * 5, v / 2),
+                1..=3 => {
+                    let atk = if s == prim { v } else { v / 4 };
+                    let mut out = format!("Attack +{atk}");
+                    if s == 3 { out.push_str(&format!(" · Mana +{}", v * 2)); }
+                    out
+                }
+                4 => format!("Attack +{}", v / 2),
+                5 => format!("Crit +{}%", v / 6),
+                6 => format!("Defense +{}", v / 2),
+                7 => format!("HP +{} · Attack +{}", v * 2, v / 3),
+                _ => String::new(),
+            };
+            format!("+{v} {} → {}", STAT_NAMES[s.min(7)], effect)
+        }).collect::<Vec<_>>().join("\n")
+    }
+
     pub(crate) fn tip(&self) -> String {
         let body = if self.kind == Kind::Cosmetic { "Appearance only — no stats".to_string() }
             else if self.stats.is_empty() { "No bonus stats".to_string() }
@@ -54,8 +91,8 @@ impl Item {
             };
         let sell = if self.sell_value() == 0 { "Soulbound — can't be sold".to_string() }
                    else { format!("Sells for {} gold", self.sell_value()) };
-        format!("{}\n[{}] · ilvl {} · {}\n{}\n{}",
-                self.name, QUALITY[self.quality.min(6)], self.ilvl, self.type_label(), body, sell)
+        format!("{}\n[{}] · ilvl {} · {}\n{}\n{}\n{}",
+                self.name, QUALITY[self.quality.min(6)], self.ilvl, self.type_label(), self.affix_text(), body, sell)
     }
 }
 
@@ -245,7 +282,7 @@ pub(crate) fn build(class: usize, spec: usize, level: u32, kind: Kind, slot: usi
         else { (level as i32 + 2 + QILVL[q.min(6)] + rnd(3) as i32).max(1) as u32 };
     let (name, suffix) = gen_name(q, kind, slot, wt, hands, ai);
     let stats = if kind == Kind::Cosmetic { vec![] } else { roll_stats(q, ilvl, class, spec, suffix) };
-    Item { name, quality: q, ilvl, slot, kind, wt, hands, stats }
+    Item { name, quality: q, ilvl, slot, kind, wt, hands, stats, suffix }
 }
 
 pub(crate) fn pick_weapon(class: usize, spec: usize) -> (Wt, Hands) {
@@ -415,3 +452,4 @@ pub(crate) fn gen_store(class: usize, spec: usize, level: u32) -> Vec<Item> {
 }
 
 pub(crate) fn potion_price(level: u32) -> u32 { 6 + level * 2 }
+

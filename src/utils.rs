@@ -1,3 +1,4 @@
+
 use gtk::glib;
 use crate::{config::*, data::items::*};
 
@@ -27,3 +28,4 @@ pub(crate) fn npc_name() -> String { format!("{}{}{}", ps(&SYL1), ps(&SYL2), ps(
 pub(crate) fn boss_name() -> String { format!("{}{}{}", ps(&SYL1), ps(&SYL2), ps(BOSS_END)) }
 pub(crate) fn elven_name() -> String { format!("{}'{}", ps(ELF_A), ps(ELF_B)) }
 pub(crate) fn compound_name() -> String { format!("{}{}", ps(CMP_A), ps(CMP_B)) }
+

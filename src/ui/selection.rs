@@ -1,3 +1,4 @@
+
 use std::rc::Rc;
 use gtk::{glib, prelude::*};
 use crate::{data::classes::*, persistence::persist, utils::*};
@@ -65,3 +66,4 @@ impl Ui {
         }
 
 }
+

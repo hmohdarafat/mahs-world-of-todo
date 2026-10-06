@@ -1,3 +1,4 @@
+
 //! Static item naming, quality, and equipment data.
 
 // ---------- equipment tables ----------
@@ -150,3 +151,4 @@ pub(crate) const NPC_END: &[&str] = &["ia", "ra", "na", "wen", "dor", "mar", "th
 pub(crate) const BOSS_END: &[&str] = &["gor", "thar", "nos", "zul", "rax", "goth", "dun", "mar"];
 pub(crate) const ELF_A: &[&str] = &["Felo", "Aela", "Thala", "Noro", "Vyra", "Lora", "Sili", "Kaela"];
 pub(crate) const ELF_B: &[&str] = &["melorn", "thas", "dorei", "anar", "vanis", "thalas", "nore", "estra"];
+

@@ -1,3 +1,4 @@
+
 use crate::{config::MAX_LEVEL, model::*, utils::*};
 
 impl Tier {
@@ -34,3 +35,4 @@ pub(crate) fn gather_item(cat: usize) -> String {
         _ => ps(&["Runed Relic Fragment", "Glowing Ember", "Ancient Scroll", "Crystal Shard", "Wolf Meat", "Linen Cloth"]),
     }.to_string()
 }
+

@@ -1,3 +1,4 @@
+
 //! Class, specialization, race, and role catalogs.
 
 use crate::{config::*, data::abilities::*, model::*};
@@ -86,3 +87,4 @@ pub(crate) fn cat_kind(i: usize) -> &'static str {
     match i { 0 => "general task", 1..=GATHER_MAX => "gathering", _ => "crafting" }
 }
 pub(crate) fn fcol(f: &str) -> &'static str { if f == "Horde" { "#e0453a" } else { "#4a8fe7" } }
+

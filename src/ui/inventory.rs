@@ -1,3 +1,4 @@
+
 use std::rc::Rc;
 use gtk::{glib, prelude::*};
 use crate::{config::*, data::{classes::*, items::*}, items::*, model::*, utils::*};
@@ -14,9 +15,32 @@ impl Ui {
             let cls = &CLASSES[h.class];
             let weapons: Vec<&str> = cls.weapons.iter().map(|w| w.name()).collect();
             let filled = h.gear.iter().flatten().count();
-            self.eq_sum.set_text(&format!(
-                "Avg ilvl {} · {} · {}/{} slots filled\n{} armor · {}\nWeapons: {}",
-                f.ilvl_avg(), f.setup(), filled, SLOTS.len(), cls.armor, offhand_text(cls), weapons.join(", ")));
+            let gear_totals = f.gear_stat_totals();
+            let bonus_stats = gear_totals.iter().enumerate()
+                .filter(|(_, value)| **value > 0)
+                .map(|(i, value)| format!("+{value} {}", STAT_NAMES[i]))
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let gear_impact = h.equipped_gear_impact();
+            let raw_impact = gear_totals.iter().enumerate()
+                .filter(|(_, value)| **value > 0)
+                .map(|(i, value)| {
+                    let pseudo = Item {
+                        name: String::new(), quality: 0, ilvl: 0, slot: 0,
+                        kind: Kind::Cosmetic, wt: None, hands: Hands::One,
+                        stats: vec![(i, *value)], suffix: None,
+                    };
+                    pseudo.stat_impact_text(h.class, h.spec)
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            self.eq_sum.set_markup(&format!(
+                "<b>Avg ilvl {}</b> · {} · {}/{} slots filled\n{} armor · {}\nWeapons: {}\n\n<b>Total equipped raw stats:</b> {}\n<b>What those stats do:</b>\n{}\n<b>Total gear contribution to character:</b> {}",
+                f.ilvl_avg(), f.setup(), filled, SLOTS.len(), cls.armor, offhand_text(cls),
+                glib::markup_escape_text(&weapons.join(", ")),
+                glib::markup_escape_text(if bonus_stats.is_empty() { "none" } else { &bonus_stats }),
+                glib::markup_escape_text(if raw_impact.is_empty() { "none" } else { &raw_impact }),
+                glib::markup_escape_text(&gear_impact)));
 
             for (i, slot) in SLOTS.iter().enumerate() {
                 let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -26,11 +50,18 @@ impl Ui {
                     Some(it) => {
                         let tl = it.type_label();
                         let si = it.stats_inline();
+                        let impact = h.equipped_item_impact(i);
+                        let stat_impact = it.stat_impact_text(h.class, h.spec);
                         lbl.set_markup(&format!(
-                            "<b>{slot}</b>: {}\n<small>ilvl {} · {} · {}</small>",
+                            "<b>{slot}</b>: {}\n<small>ilvl {} · {} · {}</small>\n<small>{}</small>\n<b>Raw stat effects:</b>\n<small>{}</small>\n<span foreground='#8b949e'>Current character impact: {}</span>",
                             qspan(it.quality, it.name.as_str()), it.ilvl,
-                            glib::markup_escape_text(tl.as_str()), glib::markup_escape_text(si.as_str())));
-                        lbl.set_tooltip_text(Some(&it.tip()));
+                            glib::markup_escape_text(tl.as_str()), glib::markup_escape_text(si.as_str()),
+                            glib::markup_escape_text(&it.affix_text()),
+                            glib::markup_escape_text(&stat_impact.replace('\n', " · ")),
+                            glib::markup_escape_text(&impact)));
+                        lbl.set_tooltip_text(Some(&format!(
+                            "{}\n{}\n\nStat effects:\n{}\n\nCurrent character impact: {}",
+                            it.tip(), it.affix_text(), stat_impact, impact)));
                         let btn = gtk::Button::with_label("Unequip");
                         btn.set_valign(gtk::Align::Center);
                         { let u = self.clone(); btn.connect_clicked(move |_| u.unequip(i)); }
@@ -57,11 +88,18 @@ impl Ui {
                 lbl.set_xalign(0.0); lbl.set_hexpand(true);
                 let tl = it.type_label();
                 let si = it.stats_inline();
+                let stat_impact = it.stat_impact_text(h.class, h.spec);
+                let impact = h.bag_item_impact(it);
                 lbl.set_markup(&format!(
-                    "{}\n<small>ilvl {} · {} · {}</small>",
+                    "{}\n<small>ilvl {} · {} · {}</small>\n<small>{}</small>\n<small>{}</small>\n<span foreground='#8b949e'>Equip preview: {}</span>",
                     qspan(it.quality, it.name.as_str()), it.ilvl,
-                    glib::markup_escape_text(tl.as_str()), glib::markup_escape_text(si.as_str())));
-                lbl.set_tooltip_text(Some(&it.tip()));
+                    glib::markup_escape_text(tl.as_str()), glib::markup_escape_text(si.as_str()),
+                    glib::markup_escape_text(&it.affix_text()),
+                    glib::markup_escape_text(&stat_impact.replace('\n', " · ")),
+                    glib::markup_escape_text(&impact)));
+                lbl.set_tooltip_text(Some(&format!(
+                    "{}\n{}\n\nStat effects:\n{}\n\nEquip preview: {}",
+                    it.tip(), it.affix_text(), stat_impact, impact)));
                 let can = !candidates(it, h.class, two_now).is_empty();
                 let eq = gtk::Button::with_label("Equip");
                 eq.set_valign(gtk::Align::Center);
@@ -279,3 +317,4 @@ impl Ui {
         }
 
 }
+

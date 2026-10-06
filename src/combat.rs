@@ -1,3 +1,4 @@
+
 use crate::{config::*, data::{abilities::*, classes::*, items::*}, items::*, model::*, utils::*};
 use crate::model::{K::{Absorb, Buff, Dmg, Dot, Guard, Heal, Kick, Leech, Stun, Util}, R::{Free, Mana, Stam}, Role::{Healer, Melee, Ranged, Tank}};
 
@@ -20,6 +21,164 @@ impl Fighter {
             (_, Some(_)) => "One-hand + Off-hand",
             (Some(_), None) => "One-handed",
         }
+    }
+
+    pub(crate) fn gear_stat_totals(&self) -> [u32; 8] {
+        let mut tot = [0u32; 8];
+        for it in self.gear.iter().flatten() {
+            if it.kind == Kind::Cosmetic { continue; }
+            for &(stat, value) in &it.stats {
+                tot[stat.min(7)] += value;
+            }
+        }
+        tot
+    }
+
+    pub(crate) fn gear_score(&self) -> u32 {
+        let mut gp = 0u32;
+        for it in self.gear.iter().flatten() {
+            if it.kind == Kind::Cosmetic { continue; }
+            let w = if it.is_two() { 3 } else { 2 };
+            gp += it.ilvl * QMULT[it.quality.min(6)] / 100 * w / 2;
+        }
+        gp * 6 / 14
+    }
+
+    /// A source-by-source breakdown of the exact stat formula used by `stats()`.
+    /// Each line is an additive source as actually applied by the game's formulas.
+    pub(crate) fn stat_breakdown(&self) -> String {
+        let role = self.role();
+        let prim = primary(self.class, role);
+        let tot = self.gear_stat_totals();
+
+        // `gear_score()` truncates at both stages, so reproduce its exact inputs here.
+        let mut gear_power_raw = 0u32;
+        let mut gear_power_sources: Vec<String> = vec![];
+        for (i, slot) in SLOTS.iter().enumerate() {
+            if let Some(it) = &self.gear[i] {
+                if it.kind == Kind::Cosmetic { continue; }
+                let w = if it.is_two() { 3 } else { 2 };
+                let p = it.ilvl * QMULT[it.quality.min(6)] / 100 * w / 2;
+                gear_power_raw += p;
+                gear_power_sources.push(format!("  {slot}: {} → raw gear power +{p}", esc(it.name.as_str())));
+            }
+        }
+        let g = gear_power_raw * 6 / 14;
+
+        let shield_def: u32 = self.gear.iter().flatten()
+            .filter(|it| it.kind == Kind::Shield)
+            .map(|it| it.ilvl / 2)
+            .sum();
+        let qsum: u32 = self.gear.iter().flatten()
+            .filter(|it| it.kind != Kind::Cosmetic)
+            .map(|it| it.quality.min(5) as u32)
+            .sum();
+        let (hp_m, atk_m, def_m) = match role {
+            Role::Tank => (150, 70, 150),
+            Role::Healer => (110, 60, 100),
+            Role::Melee => (110, 120, 90),
+            Role::Ranged => (90, 125, 80),
+        };
+        let armor = match CLASSES[self.class].armor {
+            "Plate" => 130, "Mail" => 115, "Leather" => 100, _ => 85,
+        };
+        let off_prim = tot[1] + tot[2] + tot[3] - tot[prim];
+
+        let hp_core = (120 + self.level * 25 + g * 4) * hp_m / 100;
+        let hp_sta = tot[0] * 5;
+        let hp_vers = tot[7] * 2;
+        let hp_total = hp_core + hp_sta + hp_vers;
+
+        let atk_core = (10 + self.level * 3 + g) * atk_m / 100;
+        let atk_ab = self.abilities().len() as u32 * 3;
+        let atk_tal = self.talents * 4;
+        let atk_prim = tot[prim];
+        let atk_off = off_prim / 4;
+        let atk_haste = tot[4] / 2;
+        let atk_vers = tot[7] / 3;
+        let atk_total = atk_core + atk_ab + atk_tal + atk_prim + atk_off + atk_haste + atk_vers;
+
+        let def_core = (self.level + g / 2) * def_m / 100 * armor / 100;
+        let def_mastery = tot[6] / 2;
+        let def_total = def_core + def_mastery + shield_def;
+
+        let crit_base = 5u32;
+        let crit_tal = self.talents;
+        let crit_quality = qsum / 3;
+        let crit_rating = tot[5] / 6;
+        let crit_total = (crit_base + crit_tal + crit_quality + crit_rating).min(40);
+
+        let mana_core = 60 + self.level * 6;
+        let mana_int = tot[3] * 2;
+        let mana_total = mana_core + mana_int;
+
+        let sta_core = 60 + self.level * 4;
+        let sta_bonus = tot[0] / 2;
+        let sta_total = sta_core + sta_bonus;
+
+        let heal_total = if role == Role::Healer { hp_total * 6 / 100 } else { 0 };
+
+        let mut out = String::new();
+        out.push_str("<b>Where your stats come from</b>\n");
+        out.push_str(&format!(
+            "<b>Calculation inputs</b>\n  Level: {}\n  Role: {} · HP multiplier {}% · Attack multiplier {}% · Defense multiplier {}%\n  Armor type: {} · armor multiplier {}%\n  Primary stat for {}: {}\n  Gear score: {} = raw gear-power sum {} × 6 / 14\n",
+            self.level,
+            role.name(),
+            hp_m, atk_m, def_m,
+            CLASSES[self.class].armor, armor,
+            CLASSES[self.class].specs[self.spec].0, STAT_NAMES[prim],
+            g, gear_power_raw
+        ));
+        if gear_power_sources.is_empty() {
+            out.push_str("  Gear power sources: none\n\n");
+        } else {
+            out.push_str("  Gear power sources:\n");
+            for line in &gear_power_sources { out.push_str(line); out.push('\n'); }
+            out.push('\n');
+        }
+
+        out.push_str(&format!("<b>HP {hp_total}</b>\n  Base + level + gear power, role-scaled: +{hp_core}\n  Stamina gear: +{hp_sta} ({} × 5)\n  Versatility gear: +{hp_vers} ({} × 2)\n\n", tot[0], tot[7]));
+        out.push_str(&format!("<b>Attack {atk_total}</b>\n  Base + level + gear power, role-scaled: +{atk_core}\n  Learned abilities: +{atk_ab} ({} × 3)\n  Talents: +{atk_tal} ({} × 4)\n  Primary {}: +{atk_prim} raw → +{atk_prim} Attack\n  Other primary stats: +{atk_off} ({} raw ÷ 4)\n  Haste: +{atk_haste} ({} raw ÷ 2)\n  Versatility: +{atk_vers} ({} raw ÷ 3)\n\n", self.abilities().len(), self.talents, STAT_NAMES[prim], off_prim, tot[4], tot[7]));
+        out.push_str(&format!("<b>Defense {def_total}</b>\n  Level + gear power, role-scaled and armor-scaled: +{def_core}\n  Mastery: +{def_mastery} ({} raw ÷ 2)\n  Shield ilvl contribution: +{shield_def} (each shield contributes ilvl ÷ 2)\n\n", tot[6]));
+        out.push_str(&format!("<b>Critical Strike {crit_total}%</b>\n  Base: +{crit_base}%\n  Talents: +{crit_tal}%\n  Gear quality: +{crit_quality}% (equipped non-cosmetic quality sum {} ÷ 3)\n  Critical Strike rating: +{crit_rating}% ({} raw ÷ 6; final capped at 40%)\n\n", qsum, tot[5]));
+        out.push_str(&format!("<b>Mana {mana_total}</b>\n  Base + level: +{mana_core}\n  Intellect gear: +{mana_int} ({} × 2)\n\n", tot[3]));
+        out.push_str(&format!("<b>Stamina resource {sta_total}</b>\n  Base + level: +{sta_core}\n  Stamina gear: +{sta_bonus} ({} raw ÷ 2)\n\n", tot[0]));
+        out.push_str(&format!("<b>Healing power {heal_total}</b>\n  Derived from final max HP × {}%{}\n\n", if role == Role::Healer { 6 } else { 0 }, if role == Role::Healer { " for Healer spec" } else { " for non-Healer specs" }));
+
+        out.push_str("<b>Raw gear-stat totals</b>\n");
+        for (i, name) in STAT_NAMES.iter().enumerate() {
+            out.push_str(&format!("  {name}: +{}\n", tot[i]));
+        }
+
+        out.push_str("\n<b>How raw gear stats convert to derived stats</b>\n");
+        let pseudo = |i: usize| -> String {
+            let one = Item {
+                name: String::new(), quality: 0, ilvl: 0, slot: 0,
+                kind: Kind::Cosmetic, wt: None, hands: Hands::One,
+                stats: vec![(i, tot[i])], suffix: None,
+            };
+            one.stat_impact_text(self.class, self.spec)
+        };
+        for i in 0..STAT_NAMES.len() {
+            if tot[i] > 0 {
+                out.push_str(&format!("  {}\n", pseudo(i)));
+            }
+        }
+
+        out.push_str("\n<b>Per-item equipment sources</b>\n");
+        for (i, slot) in SLOTS.iter().enumerate() {
+            match &self.gear[i] {
+                Some(it) if it.kind != Kind::Cosmetic => {
+                    out.push_str(&format!(
+                        "  {slot}: {} — {} — {}\n",
+                        esc(it.name.as_str()), esc(&it.affix_text()), esc(&it.stats_inline())
+                    ));
+                }
+                Some(it) => out.push_str(&format!("  {slot}: {} — cosmetic, no stats\n", esc(it.name.as_str()))),
+                None => out.push_str(&format!("  {slot}: empty\n")),
+            }
+        }
+        out
     }
 
     pub(crate) fn stats(&self) -> Stats {
@@ -304,3 +463,4 @@ pub(crate) fn gen_player(near: u32) -> Fighter {
         talents: rnd(level / 3 + 1), cur: None,
     }
 }
+

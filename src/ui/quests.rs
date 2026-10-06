@@ -1,3 +1,4 @@
+
 use std::rc::Rc;
 use gtk::{glib, prelude::*};
 use crate::{config::*, data::classes::*, model::*, persistence::*, quests::*, utils::*, world::*};
@@ -238,3 +239,4 @@ impl Ui {
 
         // ----- PvP
 }
+

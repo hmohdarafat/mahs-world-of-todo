@@ -1,3 +1,4 @@
+
 //! GTK presentation layer. UI modules only coordinate widgets and invoke game services.
 
 use std::{cell::{Cell, RefCell}, rc::Rc};
@@ -303,3 +304,4 @@ impl Ui {
         self.stack.set_visible_child_name("select");
     }
 }
+

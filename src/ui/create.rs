@@ -1,3 +1,4 @@
+
 use std::rc::Rc;
 use gtk::prelude::*;
 use crate::{config::*, data::classes::*, model::*, persistence::*, utils::*};
@@ -100,3 +101,4 @@ pub(crate) fn create_screen(ui: &Rc<Ui>) -> gtk::Box {
         });
         b
     }
+

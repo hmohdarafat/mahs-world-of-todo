@@ -1,3 +1,4 @@
+
 //! Application-wide configuration and gameplay constants.
 
 pub(crate) const APP_TITLE: &str = "MAH's World of Todo";
@@ -45,3 +46,4 @@ pub(crate) const MOBS: &[&str] = &[
 
 // potions: (name, icon)
 pub(crate) const POT: [(&str, &str); 3] = [("Health Potion", "🧪"), ("Mana Potion", "🔷"), ("Stamina Potion", "⚡")];
+

@@ -1,3 +1,4 @@
+
 mod combat;
 mod config;
 mod data;
@@ -20,3 +21,4 @@ fn main() -> glib::ExitCode {
     });
     app.run()
 }
+

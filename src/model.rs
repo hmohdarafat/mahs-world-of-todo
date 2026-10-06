@@ -1,3 +1,4 @@
+
 //! Domain types shared by game systems and the GTK layer.
 
 use serde::{Deserialize, Serialize};
@@ -91,6 +92,8 @@ pub(crate) struct Item {
     pub(crate) name: String, #[serde(alias = "rarity")] pub(crate) quality: usize, pub(crate) ilvl: u32,
     #[serde(default)] pub(crate) slot: usize, #[serde(default)] pub(crate) kind: Kind, #[serde(default)] pub(crate) wt: Option<Wt>,
     #[serde(default)] pub(crate) hands: Hands, #[serde(default)] pub(crate) stats: Vec<(usize, u32)>,
+    /// Stat-bearing named suffix used to generate this item's stats; omitted by older saves.
+    #[serde(default)] pub(crate) suffix: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -127,3 +130,4 @@ pub(crate) struct Side {
 }
 
 pub(crate) struct Duel { pub(crate) won: bool, pub(crate) lines: Vec<String>, pub(crate) hp: u32, pub(crate) mana: u32, pub(crate) sta: u32 }
+
