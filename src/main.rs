@@ -7,6 +7,7 @@ use std::{
     rc::Rc,
 };
 use Role::{Healer, Melee, Ranged, Tank};
+use Wt::{Axe, Bow, Crossbow, Dagger, Fist, Gun, Mace, Polearm, Staff, Sword, Wand, Warglaive};
 
 const APP_TITLE: &str = "MAH's World of Todo";
 const MAX_LEVEL: u32 = 90;
@@ -15,6 +16,7 @@ const ZONE_ROWS: usize = 80;
 const PVP_SHOWN: usize = 40;
 const PROF_LEVEL: u32 = 5;
 const GATHER_MAX: usize = 4; // CATS[1..=4] are gathering, the rest are crafting
+const BAG_MAX: usize = 30;
 
 const FACTIONS: [&str; 2] = ["Horde", "Alliance"];
 const HORDE: [&str; 6] = ["Orc", "Undead (Forsaken)", "Tauren", "Troll", "Blood Elf", "Goblin"];
@@ -24,10 +26,6 @@ const CATS: [&str; 14] = [
     "Adventure", "Mining", "Herbalism", "Skinning", "Fishing", "Blacksmithing", "Alchemy",
     "Engineering", "Enchanting", "Tailoring", "Leatherworking", "Jewelcrafting", "Inscription", "Cooking",
 ];
-const SLOTS: [&str; 6] = ["Head", "Shoulders", "Chest", "Legs", "Weapon", "Trinket"];
-const NOUNS: [&str; 6] = ["Helm", "Pauldrons", "Chestguard", "Leggings", "Blade", "Charm"];
-const PREFIX: [&str; 4] = ["Worn", "Sturdy", "Runed", "Dragonforged"];
-const RARITY: [&str; 4] = ["#9d9d9d", "#1eff00", "#0070dd", "#a335ee"];
 const LOG_FILTERS: [&str; 8] = ["All", "Quest", "Loot", "Level", "Achievement", "PvP", "Travel", "System"];
 const ZONE_KINDS: [&str; 8] = [
     "All", "Zones", "Dungeons", "Raids", "Battlegrounds", "Arenas", "Cities / Sanctuaries", "World PvP",
@@ -41,6 +39,202 @@ const REALM_B: [&str; 12] = [
 const SYL1: [&str; 12] = ["Ka", "Mor", "Thal", "Zul", "Bren", "Gor", "Ael", "Shi", "Vor", "Tal", "Dra", "Nym"];
 const SYL2: [&str; 10] = ["ga", "di", "we", "ra", "io", "tha", "mar", "ri", "lo", "za"];
 const SYL3: [&str; 8] = ["n", "x", "th", "s", "k", "r", "l", "nd"];
+
+// ---------- equipment tables ----------
+const SLOTS: [&str; 16] = [
+    "Head", "Shoulders", "Chest", "Wrist", "Hands", "Waist", "Legs", "Feet", "Cloak", "Necklace",
+    "Ring 1", "Ring 2", "Trinket 1", "Trinket 2", "Main Hand", "Off Hand",
+];
+const S_MAIN: usize = 14;
+const S_OFF: usize = 15;
+
+const QUALITY: [&str; 7] = ["Poor", "Common", "Uncommon", "Rare", "Epic", "Legendary", "Heirloom"];
+const QCOL: [&str; 7] = ["#9d9d9d", "#ffffff", "#1eff00", "#0070dd", "#a335ee", "#ff8000", "#00ccff"];
+const QMULT: [u32; 7] = [80, 100, 112, 128, 150, 190, 140]; // power multiplier (%)
+const QILVL: [i32; 7] = [-2, 0, 2, 5, 9, 15, 6]; // item level offset
+const QSTAT: [u32; 7] = [0, 0, 30, 34, 38, 44, 34]; // bonus stat size (% of ilvl)
+const QSELL: [u32; 7] = [1, 2, 3, 5, 8, 25, 0]; // vendor value factor
+const Q_LEGENDARY: usize = 5;
+const Q_HEIRLOOM: usize = 6;
+
+const QUALITY_GUIDE: &str = "Poor (grey) — low-level Normal quests; vendor trash, just sell it.\n\
+Common (white) — Normal quests and vendors; sell or discard.\n\
+Uncommon (green) — any quest, crafting and random drops; always has an \"of the …\" stat suffix.\n\
+Rare (blue) — crafting, quests, Dungeon/Raid tiers and random drops (generally level 20+).\n\
+Epic (purple) — high-end crafting, Dungeon/Raid/World Boss tiers, rare drops (generally level 40+).\n\
+Legendary (orange) — level 40+ Raid / World Boss quests only, ~1.5–3% per drop; unique proper names.\n\
+Heirloom (cyan) — a cache every 20th completed quest; item level scales with your level.\n\
+Cosmetic — appearance-only armor with no stats; worn only in empty slots.";
+
+const STAT_NAMES: [&str; 8] = [
+    "Stamina", "Strength", "Agility", "Intellect", "Haste", "Critical Strike", "Mastery", "Versatility",
+];
+const SUFFIXES: [(&str, [usize; 2]); 8] = [
+    ("of the Bear", [0, 1]),
+    ("of the Eagle", [0, 3]),
+    ("of the Tiger", [2, 1]),
+    ("of the Gorilla", [1, 3]),
+    ("of the Feverflare", [4, 6]),
+    ("of the Peerless", [5, 6]),
+    ("of the Harmonious", [7, 6]),
+    ("of the Aurora", [4, 7]),
+];
+
+// weapon nouns
+const N_DAGGER: &[&str] = &["Dagger", "Kris", "Stiletto", "Dirk", "Shard", "Tooth", "Blade"];
+const N_SWORD1: &[&str] = &["Sword", "Saber", "Blade", "Rapier", "Cutlass", "Scimitar", "Cleaver"];
+const N_SWORD2: &[&str] = &["Greatsword", "Claymore", "Longsword", "Zweihander", "Blade"];
+const N_AXE1: &[&str] = &["Axe", "Hatchet", "Cleaver", "Chopper", "Hackblade"];
+const N_AXE2: &[&str] = &["Greataxe", "Battleaxe", "Decapitator", "Chopper", "Hew", "Cleaver"];
+const N_MACE1: &[&str] = &["Mace", "Scepter", "Hammer", "Cudgel", "Truncheon", "Club", "Bludgeon"];
+const N_MACE2: &[&str] = &["Warhammer", "Greatmace", "Mallet", "Maul", "Smasher"];
+const N_FIST: &[&str] = &["Claws", "Fist", "Handblades", "Knuckles", "Talon", "Grasp"];
+const N_POLE: &[&str] = &["Polearm", "Halberd", "Spear", "Glaive", "Trident", "Scythe", "Pike"];
+const N_STAFF: &[&str] = &["Staff", "Spire", "Rod", "Greatstaff", "Cane", "Pillar", "Stave"];
+const N_BOW: &[&str] = &["Longbow", "Recurve", "Greatbow", "Composite Bow", "Bow"];
+const N_XBOW: &[&str] = &["Crossbow", "Arbalest", "Repeater", "Heavy Crossbow"];
+const N_GUN: &[&str] = &["Rifle", "Musket", "Blunderbuss", "Shotgun", "Carabine", "Hand-Cannon"];
+const N_WAND: &[&str] = &["Wand", "Baton", "Rod", "Scepter", "Branch"];
+const N_GLAIVE: &[&str] = &["Warglaive", "Twin Glaive", "Felglaive"];
+const N_SHIELD: &[&str] = &["Shield", "Bulwark", "Aegis", "Greatshield", "Barricade", "Defender"];
+const N_HELD: &[&str] = &["Tome", "Orb", "Grimoire", "Lantern", "Vessel", "Branch", "Talisman", "Icon"];
+const N_CLOAK: &[&str] = &["Cloak", "Cape", "Drape", "Shroud", "Greatcloak"];
+const N_NECK: &[&str] = &["Necklace", "Pendant", "Amulet", "Choker", "Locket", "Medallion"];
+const N_RING: &[&str] = &["Ring", "Band", "Signet", "Loop", "Seal"];
+const N_TRINKET: &[&str] = &["Charm", "Totem", "Idol", "Relic", "Figurine", "Fetish", "Badge", "Orb"];
+
+// armor nouns: [slot][Cloth, Leather, Mail, Plate]
+const ARMOR_NOUNS: [[&[&str]; 4]; 8] = [
+    // Head
+    [&["Cowl", "Hood", "Crown", "Circlet", "Cap", "Hat"],
+     &["Helm", "Mask", "Headpiece", "Blindfold", "Guise"],
+     &["Helm", "Coif", "Headguard", "Greathelm"],
+     &["Helm", "Greathelm", "Faceguard", "Crown", "Casque"]],
+    // Shoulders
+    [&["Mantle", "Amice", "Shoulderpads", "Epaulets"],
+     &["Spaulders", "Shoulderpads", "Pauldrons"],
+     &["Spaulders", "Epaulets", "Shoulderguards"],
+     &["Pauldrons", "Spaulders", "Shoulderplates"]],
+    // Chest
+    [&["Robe", "Vestments", "Tunic", "Raiment"],
+     &["Vest", "Tunic", "Harness", "Jerkin"],
+     &["Hauberk", "Chainmail", "Breastplate", "Tunic"],
+     &["Breastplate", "Cuirass", "Chestguard", "Armor"]],
+    // Wrist
+    [&["Bracers", "Cuffs", "Bindings", "Wraps"],
+     &["Bracers", "Armwraps", "Wristguards"],
+     &["Bracers", "Armguards", "Wristguards"],
+     &["Bracers", "Vambraces", "Armplates"]],
+    // Hands
+    [&["Gloves", "Mitts", "Handwraps"],
+     &["Gloves", "Grips", "Handguards"],
+     &["Gauntlets", "Gloves", "Handguards"],
+     &["Gauntlets", "Fists", "Handguards"]],
+    // Waist
+    [&["Cord", "Belt", "Sash", "Cinch"],
+     &["Belt", "Girdle", "Strap", "Rope Belt"],
+     &["Belt", "Girdle", "Waistguard"],
+     &["Girdle", "Belt", "Greatbelt", "Waistplate"]],
+    // Legs
+    [&["Pants", "Leggings", "Trousers", "Kilt", "Skirt"],
+     &["Leggings", "Breeches", "Pants"],
+     &["Legguards", "Chainleggings", "Greaves"],
+     &["Legplates", "Greaves", "Legguards"]],
+    // Feet
+    [&["Boots", "Slippers", "Sandals", "Footpads"],
+     &["Boots", "Footpads", "Treads", "Moccasins"],
+     &["Boots", "Greaves", "Sabatons", "Footguards"],
+     &["Sabatons", "Boots", "Stompers", "Warboots"]],
+];
+
+// materials (generic = Common/Uncommon/Rare, special = possessive Epic names)
+const M_CLOTH: &[&str] = &["Linen", "Woolen", "Silk", "Mageweave", "Runecloth", "Netherweave", "Frostweave", "Embersilk"];
+const X_CLOTH: &[&str] = &["Shadowsilk", "Moonweave", "Starthread", "Voidcloth", "Dreamweave"];
+const M_LEATHER: &[&str] = &["Tanned Leather", "Sylvan Leather", "Cured Leather", "Hardened Leather", "Rugged Leather", "Knothide", "Drakehide", "Wildhide"];
+const X_LEATHER: &[&str] = &["Dragonscale", "Emberleather", "Wyrmhide", "Stormhide", "Nightstalker"];
+const M_MAIL: &[&str] = &["Ringed", "Linked Chain", "Scaled", "Bronze Chain", "Mithril Chain", "Heavy Chain", "Brigandine", "Riveted"];
+const X_MAIL: &[&str] = &["Dragonmail", "Dreadmail", "Frostlink", "Sunmail", "Stormforged"];
+const M_PLATE: &[&str] = &["Tempered Steel", "Forged Iron", "Bronze", "Mithril", "Thorium", "Truesilver", "Obsidian", "Adamantite", "Saronite"];
+const X_PLATE: &[&str] = &["Dreadsteel", "Titansteel", "Sunforged", "Voidforged", "Starmetal"];
+const M_METAL: &[&str] = &["Copper", "Bronze", "Iron", "Steel", "Mithril", "Thorium", "Obsidian", "Cobalt", "Truesilver"];
+const X_METAL: &[&str] = &["Dreadsteel", "Frostforged", "Voidtouched", "Sunforged", "Bloodforged"];
+const M_WOOD: &[&str] = &["Oak", "Ashwood", "Ironwood", "Ebony", "Yew", "Pliable", "Gnarled", "Spellwoven"];
+const X_WOOD: &[&str] = &["Ancient", "Sunbloom", "Wyrmwood", "Nightbranch", "Moonwood"];
+const M_TECH: &[&str] = &["Gnomish", "Goblin", "Brass", "Steel-barreled", "Tinkered", "Engineered", "Iron-bound"];
+const X_TECH: &[&str] = &["Overclocked", "Explosive", "Masterwork", "Prototype"];
+const M_JEWEL: &[&str] = &["Copper", "Silver", "Gold", "Jade", "Moonstone", "Citrine", "Sapphire", "Ruby", "Onyx"];
+const X_JEWEL: &[&str] = &["Dragon-eye", "Starfire", "Voidstone", "Sunstone", "Bloodgem"];
+const M_TRINKET: &[&str] = &["Carved", "Ancient", "Glowing", "Shimmering", "Runed", "Tarnished"];
+const X_TRINKET: &[&str] = &["Primal", "Arcane", "Eldritch", "Void-touched"];
+const M_SHIELD: &[&str] = &["Wooden", "Bronze", "Iron", "Steel", "Mithril", "Thorium", "Reinforced"];
+const M_HELD: &[&str] = &["Arcane", "Etched", "Gilded", "Ancient", "Crystalline", "Leatherbound"];
+const X_HELD: &[&str] = &["Eldritch", "Runic", "Starlit", "Voidbound"];
+
+// name parts
+const POOR_ADJ: &[&str] = &["Worn", "Cracked", "Frayed", "Rusty", "Crude", "Tattered", "Battered", "Chipped", "Rotting", "Splintered", "Shoddy", "Ragged"];
+const COMMON_ADJ: &[&str] = &["Plain", "Simple", "Standard", "Sturdy", "Apprentice's", "Recruit's", "Journeyman's"];
+const RARE_ADJ: &[&str] = &["Reinforced", "Fine", "Superior", "Masterwork", "Gleaming", "Polished", "Runic", "Gladiator's"];
+const THEME_ADJ: &[&str] = &["Desecrated", "Vengeful", "Cataclysmic", "Dreadful", "Corrupted", "Radiant", "Merciless", "Eternal", "Shattered", "Sinister", "Hallowed", "Abyssal", "Wrathful", "Spectral"];
+const HEIR_ADJ: &[&str] = &["Weathered", "Burnished", "Ancestral", "Timeworn", "Gilded", "Venerable"];
+const COSM_ADJ: &[&str] = &["Festive", "Ornate", "Tournament", "Brewfest", "Winter Veil", "Lunar", "Midsummer", "Gilded"];
+const GROUP_ADJ: &[&str] = &["Fallen", "Burning", "Silent", "Frozen", "Crimson", "Ashen", "Forsaken", "Shattered"];
+const GROUP_NOUN: &[&str] = &["Vanguard", "Legion", "Covenant", "Brotherhood", "Conclave", "Wardens", "Vigil", "Host"];
+const LEG_ADJ: &[&str] = &["Blessed", "Cursed", "Hallowed", "Ancient", "Eternal", "Burning", "Sundered", "Undying"];
+const LEG_PART: &[&str] = &["Hand", "Heart", "Fang", "Eye", "Voice", "Wrath", "Shadow", "Soul"];
+const CMP_A: &[&str] = &["Gore", "Doom", "Frost", "Blood", "Storm", "Soul", "Night", "Wraith", "Dread", "Grim", "Ember", "Void", "Thunder", "Ash"];
+const CMP_B: &[&str] = &["howl", "hammer", "bane", "fang", "reaver", "song", "edge", "scream", "brand", "render", "cleaver", "fury", "wrath", "tongue"];
+const WIND_A: &[&str] = &["Wind", "Storm", "Dawn", "Night", "Star", "Flame", "Frost", "Soul"];
+const WIND_B: &[&str] = &["seeker", "bringer", "breaker", "caller", "walker", "render", "warden", "bearer"];
+const NPC_END: &[&str] = &["ia", "ra", "na", "wen", "dor", "mar", "thia", "gar"];
+const BOSS_END: &[&str] = &["gor", "thar", "nos", "zul", "rax", "goth", "dun", "mar"];
+const ELF_A: &[&str] = &["Felo", "Aela", "Thala", "Noro", "Vyra", "Lora", "Sili", "Kaela"];
+const ELF_B: &[&str] = &["melorn", "thas", "dorei", "anar", "vanis", "thalas", "nore", "estra"];
+
+// ---------- item types ----------
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
+enum Wt { Axe, Bow, Crossbow, Dagger, Fist, Gun, Mace, Polearm, Staff, Sword, Wand, Warglaive }
+const ALL_WT: [Wt; 12] = [Axe, Bow, Crossbow, Dagger, Fist, Gun, Mace, Polearm, Staff, Sword, Wand, Warglaive];
+
+impl Wt {
+    fn name(self) -> &'static str {
+        match self {
+            Axe => "Axe", Bow => "Bow", Crossbow => "Crossbow", Dagger => "Dagger", Fist => "Fist Weapon",
+            Gun => "Gun", Mace => "Mace", Polearm => "Polearm", Staff => "Staff", Sword => "Sword",
+            Wand => "Wand", Warglaive => "Warglaive",
+        }
+    }
+    fn one(self) -> bool { matches!(self, Axe | Dagger | Fist | Mace | Sword | Wand | Warglaive) }
+    fn two(self) -> bool { matches!(self, Axe | Bow | Crossbow | Gun | Mace | Polearm | Staff | Sword) }
+    fn ranged(self) -> bool { matches!(self, Bow | Crossbow | Gun) }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
+enum Hands { #[default] One, Main, Off, Two }
+impl Hands {
+    fn name(self) -> &'static str {
+        match self { Self::One => "One-Hand", Self::Main => "Main Hand", Self::Off => "Off Hand", Self::Two => "Two-Hand" }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
+enum Kind { #[default] Cosmetic, Cloth, Leather, Mail, Plate, Cloak, Necklace, Ring, Trinket, Shield, Held, Weapon }
+impl Kind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Cosmetic => "Cosmetic", Self::Cloth => "Cloth", Self::Leather => "Leather", Self::Mail => "Mail",
+            Self::Plate => "Plate", Self::Cloak => "Cloak", Self::Necklace => "Necklace", Self::Ring => "Ring",
+            Self::Trinket => "Trinket", Self::Shield => "Shield", Self::Held => "Held In Off-hand",
+            Self::Weapon => "Weapon",
+        }
+    }
+    fn armor_idx(self) -> Option<usize> {
+        match self { Self::Cloth => Some(0), Self::Leather => Some(1), Self::Mail => Some(2), Self::Plate => Some(3), _ => None }
+    }
+}
+const ARMOR: [Kind; 4] = [Kind::Cloth, Kind::Leather, Kind::Mail, Kind::Plate];
+fn armor_kind(s: &str) -> Kind {
+    match s { "Cloth" => Kind::Cloth, "Leather" => Kind::Leather, "Mail" => Kind::Mail, _ => Kind::Plate }
+}
 
 // ---------- classes ----------
 #[derive(Clone, Copy, PartialEq)]
@@ -56,38 +250,63 @@ struct Class {
     armor: &'static str,
     specs: &'static [(&'static str, Role)],
     abilities: [&'static str; 5],
+    weapons: &'static [Wt],
+    dual: bool,
+    shield: bool,
+    held: bool,
 }
 
 const CLASSES: [Class; 13] = [
     Class { name: "Death Knight", armor: "Plate", specs: &[("Blood", Tank), ("Frost", Melee), ("Unholy", Melee)],
-            abilities: ["Death Strike", "Obliterate", "Death and Decay", "Anti-Magic Shell", "Death Grip"] },
+            abilities: ["Death Strike", "Obliterate", "Death and Decay", "Anti-Magic Shell", "Death Grip"],
+            weapons: &[Axe, Mace, Sword, Polearm], dual: true, shield: false, held: false },
     Class { name: "Demon Hunter", armor: "Leather", specs: &[("Havoc", Melee), ("Vengeance", Tank), ("Devourer", Melee)],
-            abilities: ["Demon's Bite", "Eye Beam", "Metamorphosis", "Fel Rush", "Immolation Aura"] },
+            abilities: ["Demon's Bite", "Eye Beam", "Metamorphosis", "Fel Rush", "Immolation Aura"],
+            weapons: &[Fist, Sword, Axe, Warglaive], dual: true, shield: false, held: false },
     Class { name: "Druid", armor: "Leather", specs: &[("Balance", Ranged), ("Feral", Melee), ("Guardian", Tank), ("Restoration", Healer)],
-            abilities: ["Moonfire", "Rejuvenation", "Rake", "Bear Form", "Starfire"] },
+            abilities: ["Moonfire", "Rejuvenation", "Rake", "Bear Form", "Starfire"],
+            weapons: &[Dagger, Fist, Mace, Polearm, Staff], dual: false, shield: false, held: true },
     Class { name: "Evoker", armor: "Mail", specs: &[("Augmentation", Ranged), ("Devastation", Ranged), ("Preservation", Healer)],
-            abilities: ["Living Flame", "Fire Breath", "Azure Strike", "Emerald Blossom", "Hover"] },
+            abilities: ["Living Flame", "Fire Breath", "Azure Strike", "Emerald Blossom", "Hover"],
+            weapons: &[Dagger, Fist, Axe, Mace, Sword, Staff], dual: false, shield: false, held: true },
     Class { name: "Hunter", armor: "Mail", specs: &[("Beast Mastery", Ranged), ("Marksmanship", Ranged), ("Survival", Melee)],
-            abilities: ["Arcane Shot", "Kill Command", "Multi-Shot", "Aspect of the Cheetah", "Concussive Shot"] },
+            abilities: ["Arcane Shot", "Kill Command", "Multi-Shot", "Aspect of the Cheetah", "Concussive Shot"],
+            weapons: &[Bow, Crossbow, Gun, Axe, Dagger, Fist, Polearm, Staff, Sword], dual: false, shield: false, held: false },
     Class { name: "Mage", armor: "Cloth", specs: &[("Arcane", Ranged), ("Fire", Ranged), ("Frost", Ranged)],
-            abilities: ["Frostbolt", "Fire Blast", "Frost Nova", "Blink", "Polymorph"] },
+            abilities: ["Frostbolt", "Fire Blast", "Frost Nova", "Blink", "Polymorph"],
+            weapons: &[Dagger, Sword, Staff, Wand], dual: false, shield: false, held: true },
     Class { name: "Monk", armor: "Leather", specs: &[("Brewmaster", Tank), ("Mistweaver", Healer), ("Windwalker", Melee)],
-            abilities: ["Tiger Palm", "Blackout Kick", "Vivify", "Roll", "Spinning Crane Kick"] },
+            abilities: ["Tiger Palm", "Blackout Kick", "Vivify", "Roll", "Spinning Crane Kick"],
+            weapons: &[Fist, Mace, Sword, Axe, Polearm, Staff], dual: true, shield: false, held: false },
     Class { name: "Paladin", armor: "Plate", specs: &[("Holy", Healer), ("Protection", Tank), ("Retribution", Melee)],
-            abilities: ["Crusader Strike", "Holy Light", "Judgment", "Divine Shield", "Hammer of Justice"] },
+            abilities: ["Crusader Strike", "Holy Light", "Judgment", "Divine Shield", "Hammer of Justice"],
+            weapons: &[Axe, Mace, Sword, Polearm], dual: false, shield: true, held: false },
     Class { name: "Priest", armor: "Cloth", specs: &[("Discipline", Healer), ("Holy", Healer), ("Shadow", Ranged)],
-            abilities: ["Smite", "Power Word: Shield", "Flash Heal", "Shadow Word: Pain", "Mind Blast"] },
+            abilities: ["Smite", "Power Word: Shield", "Flash Heal", "Shadow Word: Pain", "Mind Blast"],
+            weapons: &[Dagger, Mace, Staff, Wand], dual: false, shield: false, held: true },
     Class { name: "Rogue", armor: "Leather", specs: &[("Assassination", Melee), ("Outlaw", Melee), ("Subtlety", Melee)],
-            abilities: ["Sinister Strike", "Stealth", "Eviscerate", "Evasion", "Kick"] },
+            abilities: ["Sinister Strike", "Stealth", "Eviscerate", "Evasion", "Kick"],
+            weapons: &[Dagger, Fist, Mace, Sword, Axe], dual: true, shield: false, held: false },
     Class { name: "Shaman", armor: "Mail", specs: &[("Elemental", Ranged), ("Enhancement", Melee), ("Restoration", Healer)],
-            abilities: ["Lightning Bolt", "Healing Wave", "Flame Shock", "Earth Shock", "Ghost Wolf"] },
+            abilities: ["Lightning Bolt", "Healing Wave", "Flame Shock", "Earth Shock", "Ghost Wolf"],
+            weapons: &[Axe, Dagger, Fist, Mace, Staff], dual: true, shield: true, held: true },
     Class { name: "Warlock", armor: "Cloth", specs: &[("Affliction", Ranged), ("Demonology", Ranged), ("Destruction", Ranged)],
-            abilities: ["Shadow Bolt", "Corruption", "Immolate", "Fear", "Drain Life"] },
+            abilities: ["Shadow Bolt", "Corruption", "Immolate", "Fear", "Drain Life"],
+            weapons: &[Dagger, Sword, Staff, Wand], dual: false, shield: false, held: true },
     Class { name: "Warrior", armor: "Plate", specs: &[("Arms", Melee), ("Fury", Melee), ("Protection", Tank)],
-            abilities: ["Charge", "Rend", "Thunder Clap", "Hamstring", "Shield Bash"] },
+            abilities: ["Charge", "Rend", "Thunder Clap", "Hamstring", "Shield Bash"],
+            weapons: &[Axe, Dagger, Fist, Mace, Polearm, Staff, Sword], dual: true, shield: true, held: false },
 ];
 
 fn spec_names(c: usize) -> Vec<&'static str> { CLASSES[c].specs.iter().map(|s| s.0).collect() }
+
+fn offhand_text(c: &Class) -> String {
+    let mut v: Vec<&str> = vec![];
+    if c.shield { v.push("Shield"); }
+    if c.dual { v.push("Dual wield"); }
+    if c.held { v.push("Held off-hand"); }
+    if v.is_empty() { "No off-hand".to_string() } else { v.join(" · ") }
+}
 
 fn races(faction: &str) -> Vec<&'static str> {
     let base = if faction == "Horde" { HORDE } else { ALLIANCE };
@@ -126,6 +345,7 @@ type Msg = (&'static str, String);
 fn m(c: &'static str, s: impl Into<String>) -> Msg { (c, s.into()) }
 fn rnd(n: u32) -> u32 { glib::random_int_range(0, n as i32) as u32 }
 fn pick<T>(a: &[T]) -> &T { &a[rnd(a.len() as u32) as usize] }
+fn ps(a: &[&'static str]) -> &'static str { a[rnd(a.len() as u32) as usize] }
 fn now() -> String {
     glib::DateTime::now_local().ok()
         .and_then(|d| d.format("%Y-%m-%d %H:%M:%S").ok())
@@ -141,6 +361,10 @@ fn commas(n: u32) -> String {
     out
 }
 fn player_name() -> String { format!("{}{}{}", pick(&SYL1), pick(&SYL2), pick(&SYL3)) }
+fn npc_name() -> String { format!("{}{}{}", ps(&SYL1), ps(&SYL2), ps(NPC_END)) }
+fn boss_name() -> String { format!("{}{}{}", ps(&SYL1), ps(&SYL2), ps(BOSS_END)) }
+fn elven_name() -> String { format!("{}'{}", ps(ELF_A), ps(ELF_B)) }
+fn compound_name() -> String { format!("{}{}", ps(CMP_A), ps(CMP_B)) }
 
 // ---------- realms ----------
 struct Realm { name: String, pop: u32, tier: usize }
@@ -275,7 +499,7 @@ fn load_zones() -> Vec<Zone> {
     if z.is_empty() { parse_zones(FALLBACK_ZONES) } else { z }
 }
 
-// ---------- data ----------
+// ---------- quests ----------
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
 enum Tier { Normal, Elite, Dungeon, Raid, WorldBoss }
 impl Tier {
@@ -299,18 +523,402 @@ impl Quest {
     }
 }
 
+// ---------- items ----------
 #[derive(Serialize, Deserialize, Clone)]
-struct Item { name: String, rarity: usize, ilvl: u32 }
-
-fn make_item(level: u32, armor: &str, slot: usize, rarity: usize) -> Item {
-    let name = if slot < 4 {
-        format!("{} {} {}", PREFIX[rarity], armor, NOUNS[slot])
-    } else {
-        format!("{} {}", PREFIX[rarity], NOUNS[slot])
-    };
-    Item { name, rarity, ilvl: level + 2 + rarity as u32 * 3 + rnd(3) }
+struct Item {
+    name: String,
+    #[serde(alias = "rarity")]
+    quality: usize,
+    ilvl: u32,
+    #[serde(default)] slot: usize,
+    #[serde(default)] kind: Kind,
+    #[serde(default)] wt: Option<Wt>,
+    #[serde(default)] hands: Hands,
+    #[serde(default)] stats: Vec<(usize, u32)>,
 }
 
+fn qspan(q: usize, text: &str) -> String {
+    let t = glib::markup_escape_text(text);
+    if q == 1 { t.to_string() } else { format!("<span foreground='{}'>{}</span>", QCOL[q.min(6)], t) }
+}
+
+impl Item {
+    fn is_two(&self) -> bool { self.kind == Kind::Weapon && self.hands == Hands::Two }
+
+    fn type_label(&self) -> String {
+        match self.kind {
+            Kind::Weapon => format!("{} {}", self.hands.name(), self.wt.map_or("Weapon", |w| w.name())),
+            Kind::Shield => "Shield".to_string(),
+            Kind::Held => "Held In Off-hand".to_string(),
+            Kind::Cosmetic => format!("Cosmetic {}", SLOTS[self.slot.min(7)]),
+            Kind::Cloth | Kind::Leather | Kind::Mail | Kind::Plate => {
+                format!("{} {}", self.kind.name(), SLOTS[self.slot.min(7)])
+            }
+            k => k.name().to_string(),
+        }
+    }
+
+    fn label(&self) -> String {
+        format!("[{}] {} (ilvl {} · {})", QUALITY[self.quality.min(6)], self.name, self.ilvl, self.type_label())
+    }
+
+    fn sell_value(&self) -> u32 {
+        let f = QSELL[self.quality.min(6)];
+        if f == 0 { 0 } else { (self.ilvl * f / 3).max(1) }
+    }
+
+    fn stats_inline(&self) -> String {
+        if self.kind == Kind::Cosmetic { return "appearance only".to_string(); }
+        if self.stats.is_empty() { return "no bonus stats".to_string(); }
+        self.stats.iter().map(|&(s, v)| format!("+{v} {}", STAT_NAMES[s.min(7)])).collect::<Vec<_>>().join(", ")
+    }
+
+    fn tip(&self) -> String {
+        let body = if self.kind == Kind::Cosmetic { "Appearance only — no stats".to_string() }
+            else if self.stats.is_empty() { "No bonus stats".to_string() }
+            else {
+                self.stats.iter().map(|&(s, v)| format!("+{v} {}", STAT_NAMES[s.min(7)]))
+                    .collect::<Vec<_>>().join("\n")
+            };
+        let sell = if self.sell_value() == 0 { "Soulbound — can't be sold".to_string() }
+                   else { format!("Sells for {} gold", self.sell_value()) };
+        format!("{}\n[{}] · ilvl {} · {}\n{}\n{}",
+                self.name, QUALITY[self.quality.min(6)], self.ilvl, self.type_label(), body, sell)
+    }
+}
+
+fn primary(class: usize, role: Role) -> usize {
+    match CLASSES[class].name {
+        "Mage" | "Priest" | "Warlock" | "Evoker" => 3,
+        "Death Knight" | "Warrior" => 1,
+        "Paladin" => if role == Healer { 3 } else { 1 },
+        "Druid" | "Monk" | "Shaman" => if matches!(role, Healer | Ranged) { 3 } else { 2 },
+        _ => 2,
+    }
+}
+
+fn stat_value(s: usize, v: u32, prim: usize) -> u32 {
+    match s { 0 => v, 1..=3 => if s == prim { v } else { v / 4 }, _ => v / 2 }
+}
+
+fn item_power(it: &Item, class: usize, spec: usize) -> u32 {
+    if it.kind == Kind::Cosmetic { return 0; }
+    let prim = primary(class, CLASSES[class].specs[spec].1);
+    let w = if it.is_two() { 3 } else { 2 };
+    let mut p = it.ilvl * QMULT[it.quality.min(6)] / 100 * w / 2;
+    for &(s, v) in &it.stats { p += stat_value(s, v, prim); }
+    p
+}
+
+/// Which equipment slots could this item go into for the class?
+fn candidates(it: &Item, class: usize, two_now: bool) -> Vec<usize> {
+    let c = &CLASSES[class];
+    match it.kind {
+        Kind::Cosmetic => vec![it.slot.min(7)],
+        Kind::Cloth | Kind::Leather | Kind::Mail | Kind::Plate => {
+            if it.kind.name() == c.armor { vec![it.slot.min(7)] } else { vec![] }
+        }
+        Kind::Cloak => vec![8],
+        Kind::Necklace => vec![9],
+        Kind::Ring => vec![10, 11],
+        Kind::Trinket => vec![12, 13],
+        Kind::Shield => if c.shield && !two_now { vec![S_OFF] } else { vec![] },
+        Kind::Held => if c.held && !two_now { vec![S_OFF] } else { vec![] },
+        Kind::Weapon => {
+            let Some(w) = it.wt else { return vec![] };
+            if !c.weapons.contains(&w) { return vec![]; }
+            match it.hands {
+                Hands::Two | Hands::Main => vec![S_MAIN],
+                Hands::Off => if c.dual && !two_now { vec![S_OFF] } else { vec![] },
+                Hands::One => {
+                    let mut v = vec![S_MAIN];
+                    if c.dual && !two_now { v.push(S_OFF); }
+                    v
+                }
+            }
+        }
+    }
+}
+
+fn usable(it: &Item, class: usize) -> bool { !candidates(it, class, false).is_empty() }
+
+// ---------- random item generation ----------
+fn weapon_nouns(w: Wt, two: bool) -> &'static [&'static str] {
+    match (w, two) {
+        (Dagger, _) => N_DAGGER,
+        (Sword, false) => N_SWORD1,
+        (Sword, true) => N_SWORD2,
+        (Axe, false) => N_AXE1,
+        (Axe, true) => N_AXE2,
+        (Mace, false) => N_MACE1,
+        (Mace, true) => N_MACE2,
+        (Fist, _) => N_FIST,
+        (Polearm, _) => N_POLE,
+        (Staff, _) => N_STAFF,
+        (Bow, _) => N_BOW,
+        (Crossbow, _) => N_XBOW,
+        (Gun, _) => N_GUN,
+        (Wand, _) => N_WAND,
+        (Warglaive, _) => N_GLAIVE,
+    }
+}
+
+fn mats(kind: Kind, wt: Option<Wt>) -> (&'static [&'static str], &'static [&'static str]) {
+    match kind {
+        Kind::Cloth | Kind::Cloak | Kind::Cosmetic => (M_CLOTH, X_CLOTH),
+        Kind::Leather => (M_LEATHER, X_LEATHER),
+        Kind::Mail => (M_MAIL, X_MAIL),
+        Kind::Plate => (M_PLATE, X_PLATE),
+        Kind::Necklace | Kind::Ring => (M_JEWEL, X_JEWEL),
+        Kind::Trinket => (M_TRINKET, X_TRINKET),
+        Kind::Shield => (M_SHIELD, X_METAL),
+        Kind::Held => (M_HELD, X_HELD),
+        Kind::Weapon => match wt {
+            Some(Bow | Staff | Wand) => (M_WOOD, X_WOOD),
+            Some(Gun | Crossbow) => (M_TECH, X_TECH),
+            _ => (M_METAL, X_METAL),
+        },
+    }
+}
+
+fn noun_for(look: Kind, slot: usize, wt: Option<Wt>, hands: Hands, ai: usize) -> &'static str {
+    let list: &[&'static str] = match look {
+        Kind::Cloth | Kind::Leather | Kind::Mail | Kind::Plate | Kind::Cosmetic => {
+            ARMOR_NOUNS[slot.min(7)][ai.min(3)]
+        }
+        Kind::Cloak => N_CLOAK,
+        Kind::Necklace => N_NECK,
+        Kind::Ring => N_RING,
+        Kind::Trinket => N_TRINKET,
+        Kind::Shield => N_SHIELD,
+        Kind::Held => N_HELD,
+        Kind::Weapon => weapon_nouns(wt.unwrap_or(Sword), hands == Hands::Two),
+    };
+    ps(list)
+}
+
+fn legend_name(noun: &str) -> String {
+    match rnd(3) {
+        0 => format!("{}, {} {noun} of the {}{}", compound_name(), ps(LEG_ADJ), ps(WIND_A), ps(WIND_B)),
+        1 => format!("{}, {} of {}", compound_name(), ps(LEG_PART), boss_name()),
+        _ => elven_name(),
+    }
+}
+
+/// Dynamic name generator. Returns (name, optional stat-suffix index).
+fn gen_name(q: usize, kind: Kind, slot: usize, wt: Option<Wt>, hands: Hands, ai: usize) -> (String, Option<usize>) {
+    let look = if kind == Kind::Cosmetic { ARMOR[ai.min(3)] } else { kind };
+    let noun = noun_for(look, slot, wt, hands, ai);
+    let (generic, special) = mats(look, wt);
+    let mat = ps(generic);
+    let weapon = kind == Kind::Weapon;
+    if kind == Kind::Cosmetic {
+        return (format!("{} {mat} {noun}", ps(COSM_ADJ)), None);
+    }
+    match q {
+        0 => (format!("{} {noun}", ps(POOR_ADJ)), None),
+        1 => {
+            let pre = if rnd(100) < 35 { format!("{} ", ps(COMMON_ADJ)) } else { String::new() };
+            (format!("{pre}{mat} {noun}"), None)
+        }
+        2 => {
+            let s = rnd(SUFFIXES.len() as u32) as usize;
+            (format!("{mat} {noun} {}", SUFFIXES[s].0), Some(s))
+        }
+        3 => {
+            if rnd(100) < 55 {
+                let s = rnd(SUFFIXES.len() as u32) as usize;
+                (format!("{} {mat} {noun} {}", ps(RARE_ADJ), SUFFIXES[s].0), Some(s))
+            } else {
+                (format!("{} {mat} {noun}", ps(THEME_ADJ)), None)
+            }
+        }
+        4 => match rnd(100) {
+            0..=34 => (format!("{} {mat} {noun}", ps(THEME_ADJ)), None),
+            35..=64 => (format!("{}'s {} {noun}", npc_name(), ps(special)), None),
+            65..=84 if weapon => (compound_name(), None),
+            _ => (format!("{noun} of the {} {}", ps(GROUP_ADJ), ps(GROUP_NOUN)), None),
+        },
+        5 => (legend_name(noun), None),
+        _ => (format!("{} {mat} {noun}", ps(HEIR_ADJ)), None),
+    }
+}
+
+fn roll_stats(q: usize, ilvl: u32, class: usize, spec: usize, suffix: Option<usize>) -> Vec<(usize, u32)> {
+    let unit = ilvl * QSTAT[q.min(6)] / 100;
+    let val = || (unit + rnd(3)).max(1);
+    if let Some(s) = suffix {
+        return SUFFIXES[s].1.iter().map(|&st| (st, val())).collect();
+    }
+    let n = match q { 0 | 1 => 0, 2 | 3 => 2, 4 => 3, 5 => 4, _ => 2 };
+    if n == 0 { return vec![]; }
+    let prim = primary(class, CLASSES[class].specs[spec].1);
+    let mut stats: Vec<usize> = vec![if q == Q_HEIRLOOM { 0 } else { prim }];
+    if q == Q_HEIRLOOM { stats.push(prim); }
+    let pool = [0usize, 4, 5, 6, 7];
+    while stats.len() < n {
+        let s = pool[rnd(5) as usize];
+        if !stats.contains(&s) { stats.push(s); }
+    }
+    stats.into_iter().map(|s| (s, val())).collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build(class: usize, spec: usize, level: u32, kind: Kind, slot: usize, wt: Option<Wt>, hands: Hands, q: usize) -> Item {
+    let ai = if kind == Kind::Cosmetic { rnd(4) as usize } else { kind.armor_idx().unwrap_or(0) };
+    let ilvl = if kind == Kind::Cosmetic { 1 }
+        else if q == Q_HEIRLOOM { level + 6 }
+        else { (level as i32 + 2 + QILVL[q.min(6)] + rnd(3) as i32).max(1) as u32 };
+    let (name, suffix) = gen_name(q, kind, slot, wt, hands, ai);
+    let stats = if kind == Kind::Cosmetic { vec![] } else { roll_stats(q, ilvl, class, spec, suffix) };
+    Item { name, quality: q, ilvl, slot, kind, wt, hands, stats }
+}
+
+fn pick_weapon(class: usize, spec: usize) -> (Wt, Hands) {
+    let c = &CLASSES[class];
+    let role = c.specs[spec].1;
+    let mut pool: Vec<Wt> = c.weapons.to_vec();
+    if c.name == "Hunter" {
+        let want = role == Ranged;
+        pool.retain(|w| w.ranged() == want);
+    }
+    let shield_tank = c.shield && role == Tank;
+    if shield_tank {
+        let ones: Vec<Wt> = pool.iter().copied().filter(|w| w.one()).collect();
+        if !ones.is_empty() { pool = ones; }
+    }
+    let w = pool[rnd(pool.len() as u32) as usize];
+    let one_variant = if rnd(100) < 15 { Hands::Main } else { Hands::One };
+    let hands = if w.one() && w.two() {
+        if !shield_tank && rnd(2) == 0 { Hands::Two } else { one_variant }
+    } else if w.two() {
+        Hands::Two
+    } else {
+        one_variant
+    };
+    (w, hands)
+}
+
+fn pick_offhand(class: usize, spec: usize) -> Option<(Kind, Option<Wt>, Hands)> {
+    let c = &CLASSES[class];
+    let role = c.specs[spec].1;
+    let mut opts: Vec<u8> = vec![];
+    if c.dual { opts.push(0); }
+    if c.shield { opts.push(1); }
+    if c.held { opts.push(2); }
+    if c.shield && role == Tank { opts = vec![1]; }
+    if opts.is_empty() { return None; }
+    Some(match opts[rnd(opts.len() as u32) as usize] {
+        0 => {
+            let pool: Vec<Wt> = c.weapons.iter().copied().filter(|w| w.one() && !w.ranged() && *w != Wand).collect();
+            let w = pool[rnd(pool.len() as u32) as usize];
+            (Kind::Weapon, Some(w), if rnd(100) < 25 { Hands::Off } else { Hands::One })
+        }
+        1 => (Kind::Shield, None, Hands::One),
+        _ => (Kind::Held, None, Hands::One),
+    })
+}
+
+/// cat: 0..=7 body, 8 cloak, 9 necklace, 10/11 ring, 12/13 trinket, 14 weapon, 15 off-hand.
+fn make_item(class: usize, spec: usize, level: u32, cat: usize, q: usize) -> Option<Item> {
+    let own = armor_kind(CLASSES[class].armor);
+    Some(match cat {
+        0..=7 => build(class, spec, level, own, cat, None, Hands::One, q),
+        8 => build(class, spec, level, Kind::Cloak, 8, None, Hands::One, q),
+        9 => build(class, spec, level, Kind::Necklace, 9, None, Hands::One, q),
+        10 | 11 => build(class, spec, level, Kind::Ring, 10, None, Hands::One, q),
+        12 | 13 => build(class, spec, level, Kind::Trinket, 12, None, Hands::One, q),
+        14 => {
+            let (w, h) = pick_weapon(class, spec);
+            build(class, spec, level, Kind::Weapon, S_MAIN, Some(w), h, q)
+        }
+        _ => {
+            let (k, w, h) = pick_offhand(class, spec)?;
+            build(class, spec, level, k, S_OFF, w, h, q)
+        }
+    })
+}
+
+fn random_cat() -> usize {
+    match rnd(100) {
+        0..=47 => rnd(8) as usize,
+        48..=55 => 8,
+        56..=63 => 9,
+        64..=72 => 10,
+        73..=80 => 12,
+        81..=91 => S_MAIN,
+        _ => S_OFF,
+    }
+}
+
+fn drop_item(class: usize, spec: usize, level: u32, q: usize) -> Item {
+    loop {
+        if let Some(it) = make_item(class, spec, level, random_cat(), q) { return it; }
+    }
+}
+
+fn cosmetic_item(class: usize, spec: usize, level: u32) -> Item {
+    build(class, spec, level, Kind::Cosmetic, rnd(8) as usize, None, Hands::One, 1 + rnd(4) as usize)
+}
+
+/// Armor or weapon the class cannot use (vendor fodder).
+fn unusable_item(class: usize, spec: usize, level: u32, q: usize) -> Item {
+    let c = &CLASSES[class];
+    let wrong_armor = |_: ()| {
+        let own = armor_kind(c.armor);
+        let others: Vec<Kind> = ARMOR.iter().copied().filter(|k| *k != own).collect();
+        build(class, spec, level, *pick(&others), rnd(8) as usize, None, Hands::One, q)
+    };
+    if rnd(2) == 0 { return wrong_armor(()); }
+    let bad: Vec<Wt> = ALL_WT.iter().copied().filter(|w| !c.weapons.contains(w)).collect();
+    if bad.is_empty() { return wrong_armor(()); }
+    let w = *pick(&bad);
+    let hands = if w.two() && !w.one() { Hands::Two } else { Hands::One };
+    build(class, spec, level, Kind::Weapon, S_MAIN, Some(w), hands, q)
+}
+
+fn roll_quality(level: u32, tier: Tier, cat: usize, bonus: u32) -> usize {
+    let t = tier as u32;
+    let high = t >= Tier::Raid as u32;
+    let chance = if tier == Tier::WorldBoss { 30 } else { 15 };
+    if level >= 40 && (high || bonus >= 50) && rnd(1000) < chance { return Q_LEGENDARY; }
+    let craft = if cat > GATHER_MAX { 80 } else { 0 };
+    let score = rnd(1000) + t * 80 + bonus * 2 + craft;
+    if score >= 1000 && level >= 40 { 4 }
+    else if score >= 800 && (level >= 20 || t >= Tier::Dungeon as u32) { 3 }
+    else if score >= 480 { 2 }
+    else if score >= 240 { 1 }
+    else { 0 }
+}
+
+fn npc_quality(level: u32) -> usize {
+    if rnd(100) < 4 { return Q_HEIRLOOM; }
+    let r = rnd(100);
+    let mut q = if r < 15 { 0 } else if r < 40 { 1 } else if r < 70 { 2 } else if r < 90 { 3 } else if r < 99 { 4 } else { 5 };
+    if q >= 4 && level < 40 { q = 3; }
+    if q == 3 && level < 20 { q = 2; }
+    q
+}
+
+fn build_gear(class: usize, spec: usize, level: u32) -> Vec<Option<Item>> {
+    let mut g: Vec<Option<Item>> = vec![None; SLOTS.len()];
+    for slot in 0..S_MAIN {
+        if rnd(100) < 90 {
+            let cat = match slot { 11 => 10, 13 => 12, s => s };
+            g[slot] = make_item(class, spec, level, cat, npc_quality(level));
+        }
+    }
+    if let Some(mh) = make_item(class, spec, level, S_MAIN, npc_quality(level)) {
+        let two = mh.is_two();
+        g[S_MAIN] = Some(mh);
+        if !two && rnd(100) < 90 {
+            g[S_OFF] = make_item(class, spec, level, S_OFF, npc_quality(level));
+        }
+    }
+    g
+}
+
+// ---------- hero ----------
 #[derive(Serialize, Deserialize, Clone)]
 struct LogEntry { time: String, cat: String, msg: String }
 
@@ -323,6 +931,7 @@ struct Hero {
     zone: String, zone_inst: String,
     abilities: Vec<String>, gear: Vec<Option<Item>>, prof: Vec<u32>, achievements: Vec<String>,
     quests: Vec<Quest>, log: Vec<LogEntry>,
+    #[serde(default)] bag: Vec<Item>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -336,11 +945,15 @@ impl Hero {
             level: 1, xp: 0, gold: 0, talents: 0, done: 0, honor: 0, wins: 0, losses: 0,
             zone: start_zone(race).into(), zone_inst: String::new(),
             abilities: vec![], gear: vec![None; SLOTS.len()], prof: vec![0; CATS.len() - 1],
-            achievements: vec![], quests: vec![], log: vec![],
+            achievements: vec![], quests: vec![], log: vec![], bag: vec![],
         }
     }
 
     fn need(&self) -> u32 { 100 + self.level * 50 }
+
+    fn two_now(&self) -> bool {
+        self.gear.get(S_MAIN).and_then(|o| o.as_ref()).map_or(false, |i| i.is_two())
+    }
 
     fn fighter(&self) -> Fighter {
         Fighter {
@@ -359,6 +972,82 @@ impl Hero {
         if n > MAX_LOG { self.log.drain(..n - MAX_LOG); }
     }
 
+    /// Equip into the best slot. Ok(displaced items) or Err(item) if not equipped.
+    fn place(&mut self, it: Item, force: bool) -> Result<Vec<Item>, Item> {
+        let cands = candidates(&it, self.class, self.two_now());
+        if cands.is_empty() { return Err(it); }
+        let (class, spec) = (self.class, self.spec);
+        let pw = |o: &Option<Item>| o.as_ref().map_or(-1i64, |i| item_power(i, class, spec) as i64);
+        let target = cands.iter().copied().min_by_key(|&s| pw(&self.gear[s])).unwrap_or(S_MAIN);
+        let two = it.is_two();
+        let old_p = if two {
+            let (a, b) = (pw(&self.gear[S_MAIN]), pw(&self.gear[S_OFF]));
+            if a < 0 && b < 0 { -1 } else { a.max(0) + b.max(0) }
+        } else {
+            pw(&self.gear[target])
+        };
+        if !force && item_power(&it, class, spec) as i64 <= old_p { return Err(it); }
+        let mut out = vec![];
+        if let Some(o) = self.gear[target].take() { out.push(o); }
+        if two {
+            if let Some(o) = self.gear[S_OFF].take() { out.push(o); }
+        }
+        self.gear[target] = Some(it);
+        Ok(out)
+    }
+
+    fn stash(&mut self, it: Item, msgs: &mut Vec<Msg>) {
+        if self.bag.len() < BAG_MAX || it.quality == Q_HEIRLOOM {
+            self.bag.push(it);
+        } else {
+            let g = it.sell_value();
+            self.gold += g;
+            msgs.push(m("Loot", format!("🪙 Bag full — sold {} for {g} gold", it.label())));
+        }
+    }
+
+    fn receive(&mut self, it: Item, msgs: &mut Vec<Msg>) {
+        let label = it.label();
+        if !usable(&it, self.class) {
+            let g = it.sell_value();
+            self.gold += g;
+            msgs.push(m("Loot", format!("🪙 Can't use {label} — sold for {g} gold")));
+            return;
+        }
+        match self.place(it, false) {
+            Ok(old) => {
+                msgs.push(m("Loot", format!("🎁 Equipped {label}")));
+                for o in old { self.stash(o, msgs); }
+            }
+            Err(it) => {
+                msgs.push(m("Loot", format!("🎒 Bag: {label}")));
+                self.stash(it, msgs);
+            }
+        }
+    }
+
+    fn loot_one(&mut self, q: &Quest, msgs: &mut Vec<Msg>) {
+        let qual = roll_quality(self.level, q.tier, q.cat, q.bonus);
+        let (cl, sp, lv) = (self.class, self.spec, self.level);
+        let it = match rnd(100) {
+            0..=5 => unusable_item(cl, sp, lv, qual),
+            6..=11 => cosmetic_item(cl, sp, lv),
+            _ => drop_item(cl, sp, lv, qual),
+        };
+        self.receive(it, msgs);
+    }
+
+    fn refresh_heirlooms(&mut self) {
+        let l = self.level + 6;
+        for it in self.gear.iter_mut().flatten().chain(self.bag.iter_mut()) {
+            if it.quality == Q_HEIRLOOM {
+                it.ilvl = l;
+                let v = l * QSTAT[Q_HEIRLOOM] / 100 + 1;
+                for s in it.stats.iter_mut() { s.1 = v; }
+            }
+        }
+    }
+
     fn turn_in(&mut self, q: &Quest) -> Vec<Msg> {
         let mult = q.tier.mult();
         let pct = 100 + q.bonus;
@@ -375,25 +1064,21 @@ impl Hero {
         if q.bonus > 0 { msgs.push(m("Quest", format!("🗺 {} zone bonus: +{}%", q.zone, q.bonus))); }
         if q.cat > 0 { msgs.push(m("Quest", format!("🔨 {} skill +{}", CATS[q.cat], q.goal))); }
 
-        if rnd(100) < loot {
-            let roll = rnd(100) + (mult - 1) * 6;
-            let rarity = match roll { 130.. => 3, 100..=129 => 2, 60..=99 => 1, _ => 0 };
-            let slot = rnd(SLOTS.len() as u32) as usize;
-            let item = make_item(self.level, CLASSES[self.class].armor, slot, rarity);
-            let better = self.gear[slot].as_ref().map_or(true, |c| item.ilvl > c.ilvl);
-            if better {
-                msgs.push(m("Loot", format!("🎁 Loot equipped: {} (ilvl {})", item.name, item.ilvl)));
-                self.gear[slot] = Some(item);
-            } else {
-                self.gold += item.ilvl;
-                msgs.push(m("Loot", format!("🎁 Loot sold: {} for {} gold", item.name, item.ilvl)));
-            }
+        let drops = if matches!(q.tier, Tier::Raid | Tier::WorldBoss) { 2 } else { 1 };
+        for _ in 0..drops {
+            if rnd(100) < loot { self.loot_one(q, &mut msgs); }
+        }
+        if self.done % 20 == 0 {
+            let it = drop_item(self.class, self.spec, self.level, Q_HEIRLOOM);
+            msgs.push(m("Loot", "🏺 Heirloom cache unlocked (every 20 quests)!"));
+            self.receive(it, &mut msgs);
         }
 
         while self.xp >= self.need() && self.level < MAX_LEVEL {
             let n = self.need();
             self.xp -= n;
             self.level += 1;
+            self.refresh_heirlooms();
             msgs.push(m("Level", format!("⬆ LEVEL UP! You are now level {}", self.level)));
             let l = self.level as usize;
             let ab = CLASSES[self.class].abilities;
@@ -423,7 +1108,10 @@ impl Hero {
             ("Level 20", self.level >= 20),
             ("Level 40", self.level >= 40),
             ("Moneybags - 100 gold", self.gold >= 100),
-            ("Epic Find", self.gear.iter().flatten().any(|i| i.rarity == 3)),
+            ("Epic Find", self.gear.iter().flatten().any(|i| i.quality >= 4 && i.quality != Q_HEIRLOOM)),
+            ("Legendary Find", self.gear.iter().flatten().chain(self.bag.iter()).any(|i| i.quality == Q_LEGENDARY)),
+            ("Heirloom Collector", self.gear.iter().flatten().chain(self.bag.iter()).any(|i| i.quality == Q_HEIRLOOM)),
+            ("Fully Geared - every slot filled", self.gear.iter().all(|g| g.is_some())),
             ("Master Crafter - 25 skill", self.prof.iter().any(|&p| p >= 25)),
             ("Duelist - 1 PvP win", self.wins >= 1),
             ("Gladiator - 10 PvP wins", self.wins >= 10),
@@ -451,27 +1139,54 @@ impl Fighter {
     fn role(&self) -> Role { CLASSES[self.class].specs[self.spec].1 }
 
     fn ilvl_avg(&self) -> u32 {
-        let v: Vec<u32> = self.gear.iter().flatten().map(|i| i.ilvl).collect();
+        let v: Vec<u32> = self.gear.iter().flatten().filter(|i| i.kind != Kind::Cosmetic).map(|i| i.ilvl).collect();
         if v.is_empty() { 0 } else { v.iter().sum::<u32>() / v.len() as u32 }
     }
 
+    fn setup(&self) -> &'static str {
+        match (&self.gear[S_MAIN], &self.gear[S_OFF]) {
+            (None, None) => "Unarmed",
+            (Some(mh), _) if mh.is_two() => "Two-handed",
+            (_, Some(o)) if o.kind == Kind::Weapon => "Dual wield",
+            (_, Some(o)) if o.kind == Kind::Shield => "One-hand + Shield",
+            (_, Some(_)) => "One-hand + Off-hand",
+            (Some(_), None) => "One-handed",
+        }
+    }
+
     fn stats(&self) -> Stats {
-        let g: u32 = self.gear.iter().flatten().map(|i| i.ilvl).sum();
-        let rar: u32 = self.gear.iter().flatten().map(|i| i.rarity as u32).sum();
-        let (hp_m, atk_m, def_m) = match self.role() {
+        let role = self.role();
+        let prim = primary(self.class, role);
+        let mut gp = 0u32;
+        let mut qsum = 0u32;
+        let mut tot = [0u32; 8];
+        let mut shield_def = 0u32;
+        for it in self.gear.iter().flatten() {
+            if it.kind == Kind::Cosmetic { continue; }
+            let w = if it.is_two() { 3 } else { 2 };
+            gp += it.ilvl * QMULT[it.quality.min(6)] / 100 * w / 2;
+            qsum += it.quality.min(5) as u32;
+            for &(s, v) in &it.stats { tot[s.min(7)] += v; }
+            if it.kind == Kind::Shield { shield_def += it.ilvl / 2; }
+        }
+        let g = gp * 6 / 14;
+        let (hp_m, atk_m, def_m) = match role {
             Tank => (150, 70, 150),
             Healer => (110, 60, 100),
             Melee => (110, 120, 90),
             Ranged => (90, 125, 80),
         };
         let armor = match CLASSES[self.class].armor { "Plate" => 130, "Mail" => 115, "Leather" => 100, _ => 85 };
-        let hp = (120 + self.level * 25 + g * 4) * hp_m / 100;
+        let off_prim = tot[1] + tot[2] + tot[3] - tot[prim];
+        let hp = (120 + self.level * 25 + g * 4) * hp_m / 100 + tot[0] * 5 + tot[7] * 2;
         Stats {
             hp,
-            atk: (10 + self.level * 3 + g) * atk_m / 100 + self.abilities.len() as u32 * 3 + self.talents * 4,
-            def: (self.level + g / 2) * def_m / 100 * armor / 100,
-            crit: (5 + self.talents + rar).min(40),
-            heal: if self.role() == Healer { hp * 6 / 100 } else { 0 },
+            atk: (10 + self.level * 3 + g) * atk_m / 100
+                + self.abilities.len() as u32 * 3 + self.talents * 4
+                + tot[prim] + off_prim / 4 + tot[4] / 2 + tot[7] / 3,
+            def: (self.level + g / 2) * def_m / 100 * armor / 100 + tot[6] / 2 + shield_def,
+            crit: (5 + self.talents + qsum / 3 + tot[5] / 6).min(40),
+            heal: if role == Healer { hp * 6 / 100 } else { 0 },
         }
     }
 
@@ -494,10 +1209,10 @@ impl Fighter {
 
     fn detail(&self) -> String {
         let ab = if self.abilities.is_empty() { "—".to_string() } else { self.abilities.join(", ") };
-        let mut t = format!("Abilities: {ab}\nTalents: {}\n", self.talents);
+        let mut t = format!("Abilities: {ab}\nTalents: {}\nSetup: {}\n", self.talents, self.setup());
         for (i, slot) in SLOTS.iter().enumerate() {
             match &self.gear[i] {
-                Some(it) => t += &format!("{slot}: {} (ilvl {})\n", it.name, it.ilvl),
+                Some(it) => t += &format!("{slot}: [{}] {} (ilvl {})\n", QUALITY[it.quality.min(6)], it.name, it.ilvl),
                 None => t += &format!("{slot}: —\n"),
             }
         }
@@ -535,13 +1250,7 @@ fn gen_player(near: u32) -> Fighter {
     };
     let class = rnd(CLASSES.len() as u32) as usize;
     let spec = rnd(CLASSES[class].specs.len() as u32) as usize;
-    let armor = CLASSES[class].armor;
-    let gear: Vec<Option<Item>> = (0..SLOTS.len()).map(|slot| {
-        if rnd(100) < 90 {
-            let rarity = match rnd(100) { 0..=49 => 0, 50..=79 => 1, 80..=94 => 2, _ => 3 };
-            Some(make_item(level, armor, slot, rarity))
-        } else { None }
-    }).collect();
+    let gear = build_gear(class, spec, level);
     let n = 1 + rnd((level / 2).clamp(1, 5)) as usize;
     Fighter {
         name: player_name(), faction: faction.into(), race: pick(&pool).to_string(), class, spec, level, gear,
@@ -556,9 +1265,36 @@ fn save_path() -> PathBuf {
     let _ = std::fs::create_dir_all(&d);
     d.join("characters.json")
 }
+
+/// Convert gear saved by the old 6-slot system into the new equipment system.
+fn migrate(s: &mut Save) {
+    let map: [usize; 6] = [0, 1, 2, 6, S_MAIN, 12];
+    for h in &mut s.heroes {
+        if h.gear.len() == SLOTS.len() { continue; }
+        let old = std::mem::take(&mut h.gear);
+        h.gear = vec![None; SLOTS.len()];
+        let class = h.class.min(CLASSES.len() - 1);
+        let spec = h.spec.min(CLASSES[class].specs.len() - 1);
+        for (i, it) in old.into_iter().enumerate() {
+            let (Some(it), Some(&cat)) = (it, map.get(i)) else { continue };
+            let q = [0usize, 2, 3, 4][it.quality.min(3)];
+            if let Some(mut n) = make_item(class, spec, h.level, cat, q) {
+                n.ilvl = it.ilvl.max(1);
+                h.gear[cat] = Some(n);
+            }
+        }
+        h.log.push(LogEntry {
+            time: now(), cat: "System".into(),
+            msg: "🔧 Old gear converted to the new equipment system.".into(),
+        });
+    }
+}
+
 fn load() -> Save {
-    std::fs::read_to_string(save_path()).ok()
-        .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    let mut s: Save = std::fs::read_to_string(save_path()).ok()
+        .and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    migrate(&mut s);
+    s
 }
 fn persist(s: &Save) {
     if let Ok(j) = serde_json::to_string_pretty(s) { let _ = std::fs::write(save_path(), j); }
@@ -606,6 +1342,7 @@ struct Ui {
     pvp_head: gtk::Label, pvp_result: gtk::Label, pvp_list: gtk::Box,
     log_filter: gtk::DropDown, log_view: gtk::TextView,
     sheet: gtk::Label,
+    eq_sum: gtk::Label, eq_list: gtk::Box, bag_head: gtk::Label, bag_list: gtk::Box,
 }
 
 impl Ui {
@@ -699,6 +1436,25 @@ impl Ui {
         pad(&pvp_page, 10);
         pvp_page.append(&prow); pvp_page.append(&pvp_result); pvp_page.append(&pscroll);
 
+        // ----- equipment tab
+        let eq_sum = gtk::Label::new(None); eq_sum.set_xalign(0.0); eq_sum.set_wrap(true);
+        let eq_list = gtk::Box::new(ve, 4);
+        let eq_title = gtk::Label::new(None); eq_title.set_markup("<b>Equipped</b>"); eq_title.set_xalign(0.0);
+        let bag_head = gtk::Label::new(None); bag_head.set_xalign(0.0); bag_head.set_hexpand(true);
+        let sell_junk = gtk::Button::with_label("💰 Sell junk (Poor–Uncommon)");
+        let bag_row = gtk::Box::new(ho, 8);
+        bag_row.append(&bag_head); bag_row.append(&sell_junk);
+        let bag_list = gtk::Box::new(ve, 4);
+        let guide = gtk::Expander::new(Some("Quality guide — where items come from"));
+        let guide_lbl = gtk::Label::new(Some(QUALITY_GUIDE));
+        guide_lbl.set_xalign(0.0); guide_lbl.set_wrap(true);
+        guide.set_child(Some(&guide_lbl));
+        let eq_inner = gtk::Box::new(ve, 8);
+        pad(&eq_inner, 10);
+        eq_inner.append(&eq_sum); eq_inner.append(&guide); eq_inner.append(&eq_title);
+        eq_inner.append(&eq_list); eq_inner.append(&bag_row); eq_inner.append(&bag_list);
+        let eq_scroll = gtk::ScrolledWindow::builder().vexpand(true).child(&eq_inner).build();
+
         // ----- logs tab
         let log_filter = gtk::DropDown::from_strings(&LOG_FILTERS);
         let log_clear = gtk::Button::with_label("Clear logs");
@@ -725,6 +1481,7 @@ impl Ui {
         nb.append_page(&quests_page, Some(&gtk::Label::new(Some("📜 Quests"))));
         nb.append_page(&zones_page, Some(&gtk::Label::new(Some("🗺 Zones"))));
         nb.append_page(&pvp_page, Some(&gtk::Label::new(Some("⚔ Realm PvP"))));
+        nb.append_page(&eq_scroll, Some(&gtk::Label::new(Some("🎒 Equipment"))));
         nb.append_page(&sheet_scroll, Some(&gtk::Label::new(Some("🧙 Character"))));
         nb.append_page(&logs_page, Some(&gtk::Label::new(Some("📋 Logs"))));
 
@@ -736,7 +1493,7 @@ impl Ui {
         stack.add_named(&select, Some("select"));
         stack.add_named(&game, Some("game"));
         let win = gtk::ApplicationWindow::builder().application(app)
-            .title(APP_TITLE).default_width(940).default_height(820).build();
+            .title(APP_TITLE).default_width(960).default_height(840).build();
         win.set_child(Some(&stack));
 
         let ui = Rc::new(Ui {
@@ -744,6 +1501,7 @@ impl Ui {
             realms: make_realms(), zones: load_zones(), opps: RefCell::new(vec![]),
             stack, sel_list, title, xp_bar, stats, giver, entry, goal, tier, cat, chain, qlist, status,
             zsearch, zkind, zcount, zlist, pvp_head, pvp_result, pvp_list, log_filter, log_view, sheet,
+            eq_sum, eq_list, bag_head, bag_list,
         });
 
         { let u = ui.clone(); sel_new.connect_clicked(move |_| u.show_create()); }
@@ -753,6 +1511,7 @@ impl Ui {
         { let u = ui.clone(); switch_btn.connect_clicked(move |_| u.show_select()); }
         { let u = ui.clone(); pvp_refresh.connect_clicked(move |_| u.new_opponents()); }
         { let u = ui.clone(); log_clear.connect_clicked(move |_| u.clear_logs()); }
+        { let u = ui.clone(); sell_junk.connect_clicked(move |_| u.sell_junk()); }
         { let u = ui.clone(); ui.zsearch.connect_changed(move |_| u.refresh_zones()); }
         { let u = ui.clone(); ui.zkind.connect_selected_notify(move |_| u.refresh_zones()); }
         { let u = ui.clone(); ui.log_filter.connect_selected_notify(move |_| u.refresh_logs()); }
@@ -903,14 +1662,8 @@ impl Ui {
 
             let mut t = String::from("<b>Combat stats</b>\n");
             t += &format!("HP {} · ATK {} · DEF {} · Crit {}% · Heal {}/round · avg ilvl {}\n", st.hp, st.atk, st.def, st.crit, st.heal, f.ilvl_avg());
-            t += &format!("{} armor · {}\n\n<b>Gear</b>\n", c.armor, role.name());
-            for (i, slot) in SLOTS.iter().enumerate() {
-                match &h.gear[i] {
-                    Some(it) => t += &format!("{slot}: <span foreground='{}'>{}</span> (ilvl {})\n", RARITY[it.rarity], it.name, it.ilvl),
-                    None => t += &format!("{slot}: —\n"),
-                }
-            }
-            t += "\n<b>Professions</b>\n";
+            t += &format!("{} armor · {} · {} (see the Equipment tab)\n\n", c.armor, role.name(), f.setup());
+            t += "<b>Professions</b>\n";
             let profs: Vec<String> = h.prof.iter().enumerate().filter(|(_, p)| **p > 0)
                 .map(|(i, p)| format!("{}: {}", CATS[i + 1], p)).collect();
             t += &if profs.is_empty() { "—".to_string() } else { profs.join("\n") };
@@ -918,8 +1671,162 @@ impl Ui {
             t += &if h.achievements.is_empty() { "—".to_string() } else { h.achievements.join("\n") };
             self.sheet.set_markup(&t);
         }
+        self.refresh_equipment();
         self.refresh_zones();
         self.refresh_logs();
+    }
+
+    fn refresh_equipment(self: &Rc<Self>) {
+        while let Some(c) = self.eq_list.first_child() { self.eq_list.remove(&c); }
+        while let Some(c) = self.bag_list.first_child() { self.bag_list.remove(&c); }
+        let Some(a) = self.active.get() else { return };
+        let s = self.save.borrow();
+        let Some(h) = s.heroes.get(a) else { return };
+        let f = h.fighter();
+        let cls = &CLASSES[h.class];
+        let weapons: Vec<&str> = cls.weapons.iter().map(|w| w.name()).collect();
+        let filled = h.gear.iter().flatten().count();
+        self.eq_sum.set_text(&format!(
+            "Avg ilvl {} · {} · {}/{} slots filled\n{} armor · {}\nWeapons: {}",
+            f.ilvl_avg(), f.setup(), filled, SLOTS.len(), cls.armor, offhand_text(cls), weapons.join(", ")));
+
+        for (i, slot) in SLOTS.iter().enumerate() {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let lbl = gtk::Label::new(None);
+            lbl.set_xalign(0.0); lbl.set_hexpand(true);
+            match &h.gear[i] {
+                Some(it) => {
+                    let tl = it.type_label();
+                    let si = it.stats_inline();
+                    lbl.set_markup(&format!(
+                        "<b>{slot}</b>: {}\n<small>ilvl {} · {} · {}</small>",
+                        qspan(it.quality, it.name.as_str()), it.ilvl,
+                        glib::markup_escape_text(tl.as_str()), glib::markup_escape_text(si.as_str())));
+                    lbl.set_tooltip_text(Some(&it.tip()));
+                    let btn = gtk::Button::with_label("Unequip");
+                    btn.set_valign(gtk::Align::Center);
+                    { let u = self.clone(); btn.connect_clicked(move |_| u.unequip(i)); }
+                    row.append(&lbl); row.append(&btn);
+                }
+                None => {
+                    lbl.set_markup(&format!("<b>{slot}</b>: —"));
+                    lbl.add_css_class("dim-label");
+                    row.append(&lbl);
+                }
+            }
+            self.eq_list.append(&row);
+        }
+
+        self.bag_head.set_text(&format!("🎒 Bag ({}/{})", h.bag.len(), BAG_MAX));
+        if h.bag.is_empty() { self.bag_list.append(&gtk::Label::new(Some("Bag is empty."))); }
+        let two_now = h.two_now();
+        let mut idx: Vec<usize> = (0..h.bag.len()).collect();
+        idx.sort_by_key(|&i| std::cmp::Reverse(h.bag[i].quality));
+        for i in idx {
+            let it = &h.bag[i];
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let lbl = gtk::Label::new(None);
+            lbl.set_xalign(0.0); lbl.set_hexpand(true);
+            let tl = it.type_label();
+            let si = it.stats_inline();
+            lbl.set_markup(&format!(
+                "{}\n<small>ilvl {} · {} · {}</small>",
+                qspan(it.quality, it.name.as_str()), it.ilvl,
+                glib::markup_escape_text(tl.as_str()), glib::markup_escape_text(si.as_str())));
+            lbl.set_tooltip_text(Some(&it.tip()));
+            let can = !candidates(it, h.class, two_now).is_empty();
+            let eq = gtk::Button::with_label("Equip");
+            eq.set_valign(gtk::Align::Center);
+            eq.set_sensitive(can);
+            if !can { eq.set_tooltip_text(Some("Your class can't use this, or a two-handed weapon blocks the off-hand.")); }
+            { let u = self.clone(); eq.connect_clicked(move |_| u.equip(i)); }
+            let v = it.sell_value();
+            let sell = gtk::Button::with_label(&if v == 0 { "Bound".to_string() } else { format!("Sell {v}g") });
+            sell.set_valign(gtk::Align::Center);
+            sell.set_sensitive(v > 0);
+            { let u = self.clone(); sell.connect_clicked(move |_| u.sell(i)); }
+            row.append(&lbl); row.append(&eq); row.append(&sell);
+            self.bag_list.append(&row);
+        }
+    }
+
+    fn equip(self: &Rc<Self>, i: usize) {
+        let Some(a) = self.active.get() else { return };
+        let mut msgs: Vec<Msg> = vec![];
+        {
+            let mut s = self.save.borrow_mut();
+            let Some(h) = s.heroes.get_mut(a) else { return };
+            if i >= h.bag.len() { return; }
+            let it = h.bag.remove(i);
+            let label = it.label();
+            match h.place(it, true) {
+                Ok(old) => {
+                    msgs.push(m("Loot", format!("🛡 Equipped {label}")));
+                    for o in old { h.stash(o, &mut msgs); }
+                    h.check_achievements(&mut msgs);
+                }
+                Err(it) => {
+                    msgs.push(m("Loot", format!("❌ Can't equip {label}")));
+                    let at = i.min(h.bag.len());
+                    h.bag.insert(at, it);
+                }
+            }
+        }
+        self.finish(msgs);
+    }
+
+    fn unequip(self: &Rc<Self>, i: usize) {
+        let Some(a) = self.active.get() else { return };
+        let mut msgs: Vec<Msg> = vec![];
+        {
+            let mut s = self.save.borrow_mut();
+            let Some(h) = s.heroes.get_mut(a) else { return };
+            if h.bag.len() >= BAG_MAX {
+                msgs.push(m("Loot", "🎒 Bag is full — sell something first."));
+            } else if let Some(it) = h.gear.get_mut(i).and_then(|o| o.take()) {
+                msgs.push(m("Loot", format!("📦 Unequipped {}", it.label())));
+                h.bag.push(it);
+            }
+        }
+        self.finish(msgs);
+    }
+
+    fn sell(self: &Rc<Self>, i: usize) {
+        let Some(a) = self.active.get() else { return };
+        let mut msgs: Vec<Msg> = vec![];
+        {
+            let mut s = self.save.borrow_mut();
+            let Some(h) = s.heroes.get_mut(a) else { return };
+            let Some(it) = h.bag.get(i) else { return };
+            let v = it.sell_value();
+            if v == 0 {
+                msgs.push(m("Loot", format!("🔒 {} is soulbound and can't be sold.", it.name)));
+            } else {
+                let it = h.bag.remove(i);
+                h.gold += v;
+                msgs.push(m("Loot", format!("💰 Sold {} for {v} gold", it.label())));
+            }
+        }
+        self.finish(msgs);
+    }
+
+    fn sell_junk(self: &Rc<Self>) {
+        let Some(a) = self.active.get() else { return };
+        let mut msgs: Vec<Msg> = vec![];
+        {
+            let mut s = self.save.borrow_mut();
+            let Some(h) = s.heroes.get_mut(a) else { return };
+            let (mut total, mut n) = (0u32, 0u32);
+            let mut keep: Vec<Item> = vec![];
+            for it in std::mem::take(&mut h.bag) {
+                let v = it.sell_value();
+                if it.quality <= 2 && v > 0 { total += v; n += 1; } else { keep.push(it); }
+            }
+            h.bag = keep;
+            h.gold += total;
+            msgs.push(m("Loot", format!("💰 Sold {n} junk items for {total} gold")));
+        }
+        self.finish(msgs);
     }
 
     fn refresh_logs(self: &Rc<Self>) {
@@ -1185,8 +2092,10 @@ fn create_screen(ui: &Rc<Ui>) -> gtk::Box {
             for (_, r) in cl.specs {
                 if !roles.contains(&r.name()) { roles.push(r.name()); }
             }
-            i.set_text(&format!("{} armor · class roles: {} · selected spec role: {}",
-                                cl.armor, roles.join(", "), cl.specs[si].1.name()));
+            let weapons: Vec<&str> = cl.weapons.iter().map(|w| w.name()).collect();
+            i.set_text(&format!(
+                "{} armor · {} · weapons: {}\nclass roles: {} · selected spec role: {}",
+                cl.armor, offhand_text(cl), weapons.join(", "), roles.join(", "), cl.specs[si].1.name()));
         })
     };
     {
