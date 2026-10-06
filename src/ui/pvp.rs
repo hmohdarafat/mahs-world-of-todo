@@ -1,4 +1,3 @@
-
 use std::rc::Rc;
 use gtk::{glib, prelude::*};
 use crate::{combat::*, config::*, data::{classes::*}, model::*, utils::*};
@@ -27,6 +26,9 @@ impl Ui {
         pub(crate) fn refresh_pvp(self: &Rc<Self>) {
             while let Some(c) = self.pvp_list.first_child() { self.pvp_list.remove(&c); }
             let faction = PVP_FACTIONS[(self.pvp_faction.selected() as usize).min(PVP_FACTIONS.len() - 1)];
+            let my_faction = self.active.get()
+                .and_then(|a| self.save.borrow().heroes.get(a).map(|h| h.faction.clone()))
+                .unwrap_or_default();
             let opponents = self.opps.borrow();
             let mut visible: Vec<(usize, &Fighter)> = opponents.iter().enumerate()
                 .filter(|(_, f)| faction == "All" || f.faction == faction)
@@ -46,8 +48,11 @@ impl Ui {
                 let sub = gtk::Label::new(Some(&o.summary()));
                 sub.set_xalign(0.0); sub.add_css_class("dim-label");
                 info.append(&name); info.append(&sub);
-                let btn = gtk::Button::with_label("⚔");
-                btn.set_tooltip_text(Some("Duel this player with your current gear, abilities, HP, mana and stamina"));
+                let enemy = o.faction != my_faction;
+                let btn = gtk::Button::with_label(if enemy { "⚔ ★" } else { "⚔" });
+                btn.set_tooltip_text(Some(&format!(
+                    "Duel this player with your current gear, abilities, HP, mana and stamina.{}",
+                    if enemy { "\n★ Opposite faction: a win gives +50% XP and +1 honor." } else { "" })));
                 btn.set_valign(gtk::Align::Center);
                 { let u = self.clone(); btn.connect_clicked(move |_| u.duel(i)); }
                 row.append(&info); row.append(&btn);
@@ -77,18 +82,26 @@ impl Ui {
                 h.mana = d.mana;
                 h.sta = d.sta;
                 let text;
+                let mut xp_gain = 0u32;
                 if d.won {
-                    let honor = 10 + opp.level / 5;
+                    let enemy = opp.faction != me.faction;
+                    let honor = 10 + opp.level / 5 + enemy as u32;
+                    let base_xp = 10 + opp.level * 2 + rnd(10);
+                    xp_gain = if enemy { base_xp * 3 / 2 } else { base_xp };
                     let gold = opp.level * 2 + rnd(10);
                     h.hp = d.hp.max(1);
                     h.wins += 1; h.honor += honor; h.gold += gold;
-                    text = format!("🏆 Victory vs {} (Lv {}) in {rounds} rounds: +{honor} honor, +{gold} gold", opp.name, opp.level);
+                    text = format!(
+                        "🏆 Victory vs {} (Lv {}{}) in {rounds} rounds: +{honor} honor, +{xp_gain} XP, +{gold} gold",
+                        opp.name, opp.level, if enemy { ", enemy faction" } else { "" });
                 } else {
                     h.hp = (h.maxes().0 / 10).max(1);
                     h.losses += 1; h.honor += 1;
                     text = format!("💀 Defeat vs {} (Lv {}) after {rounds} rounds: +1 honor — you wake at 10% HP", opp.name, opp.level);
                 }
                 msgs.push(m("PvP", text.clone()));
+                if !d.won { h.wear_gear(10, &mut msgs); }
+                if xp_gain > 0 { h.gain_xp(xp_gain, &mut msgs); }
                 h.check_achievements(&mut msgs);
                 (text, msgs)
             };
@@ -96,4 +109,3 @@ impl Ui {
             self.finish(msgs);
         }
     }
-

@@ -1,11 +1,10 @@
-
 //! GTK presentation layer. UI modules only coordinate widgets and invoke game services.
 
 use std::{cell::{Cell, RefCell}, rc::Rc};
 use gtk::{glib, prelude::*};
 
 use crate::{
-    config::*, data::items::QUALITY_GUIDE, model::*, persistence::*, utils::*, world::*,
+    config::*, data::{creatures::CTYPES, items::QUALITY_GUIDE}, model::*, persistence::*, utils::*, world::*,
 };
 
 mod common;
@@ -16,6 +15,7 @@ mod pvp;
 mod quests;
 mod selection;
 mod world;
+mod blacksmith;
 
 use create::create_screen;
 
@@ -30,6 +30,8 @@ pub(crate) struct Ui {
     pub(crate) opps: RefCell<Vec<Fighter>>,
     pub(crate) store: RefCell<Vec<Item>>,
     pub(crate) store_key: Cell<(usize, u32)>,
+    pub(crate) honor_stock: RefCell<Vec<Item>>,
+    pub(crate) honor_key: Cell<(usize, u32)>,
     pub(crate) stack: gtk::Stack,
     pub(crate) sel_list: gtk::Box,
     pub(crate) title: gtk::Label, xp_bar: gtk::ProgressBar, stats: gtk::Label,
@@ -44,6 +46,8 @@ pub(crate) struct Ui {
     pub(crate) sheet: gtk::Label, ab_list: gtk::Box,
     pub(crate) eq_sum: gtk::Label, eq_paperdoll: gtk::Box, eq_list: gtk::Box, bag_head: gtk::Label, bag_list: gtk::Box,
     pub(crate) store_gold: gtk::Label, store_pots: gtk::Box, store_list: gtk::Box,
+    pub(crate) honor_lbl: gtk::Label, honor_list: gtk::Box,
+    pub(crate) smith_lbl: gtk::Label, smith_all: gtk::Button, smith_list: gtk::Box,
 }
 
 impl Ui {
@@ -115,9 +119,9 @@ impl Ui {
         let qkind = gtk::DropDown::from_strings(&["Kill", "Gather"]);
         let quest_level = gtk::DropDown::from_strings(&["Lv 1", "Lv 2", "Lv 3", "Lv 4", "Lv 5", "Lv 6"]);
         quest_level.set_tooltip_text(Some("Quest level is limited to 5 levels below/above your current character level."));
-        qkind.set_tooltip_text(Some("Choose the quest objective type. The game no longer chooses Kill or Gather randomly."));
+        qkind.set_tooltip_text(Some("Choose the quest objective type. Kill targets and gather ambushes use creatures from the zone you are in."));
         let tier = gtk::DropDown::from_strings(&["Normal"]);
-        tier.set_tooltip_text(Some("Difficulty = how big the task is. Bigger tasks pay more XP, gold and loot and unlock as you level."));
+        tier.set_tooltip_text(Some("Difficulty = how big the task is. It also sets the creature rank: Normal/Swarmer, Elite, Rare, Rare-Elite, Boss."));
         let cat = gtk::DropDown::from_strings(&["Adventure"]);
         cat.set_tooltip_text(Some("Profession = what kind of task this is. Completing it levels that skill (unlocks at level 5)."));
         let chain = gtk::CheckButton::with_label("Follow-up");
@@ -135,8 +139,9 @@ impl Ui {
         add_row.append(&labeled("Chain", &chain));
         add_row.append(&add_btn);
         let hint = gtk::Label::new(Some(
-            "Choose KILL (kill X mobs — every kill is a line you fill in and mark done or abandon) \
-             or GATHER (press ⚔ +1: each attempt may or may not find the item). The Goal field controls the required count. \
+            "Choose KILL (kill X creatures from your current zone — every kill is a line you fill in and mark done or abandon) \
+             or GATHER (press ⚔ +1: each attempt may or may not find the item, and zone creatures ambush you while you search). \
+             The Goal field controls the required count. \
              Every step has a chance to drop a health, mana or stamina potion. Quest Lv stays within ±5 of your character level;
              higher-level quests consume more HP, mana and stamina when performed.",
         ));
@@ -152,8 +157,10 @@ impl Ui {
 
         // ----- zones tab
         let zsearch = gtk::Entry::new(); zsearch.set_hexpand(true);
-        zsearch.set_placeholder_text(Some("Search zones…"));
-        let zkind = gtk::DropDown::from_strings(&ZONE_KINDS);
+        zsearch.set_placeholder_text(Some("Search zones or creatures…"));
+        let mut kinds: Vec<&str> = vec!["All creature types"];
+        kinds.extend(CTYPES);
+        let zkind = gtk::DropDown::from_strings(&kinds);
         let zcount = gtk::Label::new(None); zcount.set_xalign(0.0); zcount.add_css_class("dim-label");
         zcount.set_wrap(true);
         let zlist = gtk::Box::new(ve, 4);
@@ -221,6 +228,35 @@ impl Ui {
         store_inner.append(&store_pots); store_inner.append(&st_row); store_inner.append(&store_list);
         let store_scroll = gtk::ScrolledWindow::builder().vexpand(true).child(&store_inner).build();
 
+        // ----- honor store tab
+        let honor_lbl = gtk::Label::new(None); honor_lbl.set_xalign(0.0);
+        let honor_hint = gtk::Label::new(Some(
+            "Earn honor by winning Realm PvP duels (beating the opposite faction ★ gives +1 honor and +50% XP). \
+             Stock is Rare gear below level 40 and Epic gear from level 40, usable by your class. \
+             Bought gear goes to your bag. ▲ marks an upgrade over what you wear.",
+        ));
+        honor_hint.set_xalign(0.0); honor_hint.set_wrap(true); honor_hint.add_css_class("dim-label");
+        let honor_list = gtk::Box::new(ve, 4);
+        let honor_inner = gtk::Box::new(ve, 8);
+        pad(&honor_inner, 10);
+        honor_inner.append(&honor_lbl); honor_inner.append(&honor_hint); honor_inner.append(&honor_list);
+        let honor_scroll = gtk::ScrolledWindow::builder().vexpand(true).child(&honor_inner).build();
+
+        let smith_lbl = gtk::Label::new(None); smith_lbl.set_xalign(0.0); smith_lbl.set_hexpand(true);
+        let smith_all = gtk::Button::with_label("🔨 Repair all");
+        let smith_hint = gtk::Label::new(Some(
+            "Equipment starts at 100/100 durability and loses 10 every time you hit 0 HP. \
+            Repair cost scales with item level and missing durability."));
+        smith_hint.set_xalign(0.0); smith_hint.set_wrap(true); smith_hint.add_css_class("dim-label");
+        let smith_list = gtk::Box::new(ve, 4);
+        let smith_top = gtk::Box::new(ho, 8);
+        smith_top.append(&smith_lbl); smith_top.append(&smith_all);
+        let smith_inner = gtk::Box::new(ve, 8);
+        pad(&smith_inner, 10);
+        smith_inner.append(&smith_top); smith_inner.append(&smith_hint); smith_inner.append(&smith_list);
+        let smith_scroll = gtk::ScrolledWindow::builder().vexpand(true).child(&smith_inner).build();
+
+
         // ----- logs tab
         let log_filter = gtk::DropDown::from_strings(&LOG_FILTERS);
         let log_clear = gtk::Button::with_label("Clear logs");
@@ -252,6 +288,8 @@ impl Ui {
         nb.append_page(&pvp_page, Some(&gtk::Label::new(Some("⚔ Realm PvP"))));
         nb.append_page(&eq_scroll, Some(&gtk::Label::new(Some("🎒 Equipment"))));
         nb.append_page(&store_scroll, Some(&gtk::Label::new(Some("🏪 Store"))));
+        nb.append_page(&honor_scroll, Some(&gtk::Label::new(Some("🎖 Honor Store"))));
+        nb.append_page(&smith_scroll, Some(&gtk::Label::new(Some("🔨 Blacksmith"))));
         nb.append_page(&sheet_scroll, Some(&gtk::Label::new(Some("🧙 Character"))));
         nb.append_page(&logs_page, Some(&gtk::Label::new(Some("📋 Logs"))));
 
@@ -267,14 +305,19 @@ impl Ui {
             .title(APP_TITLE).default_width(1000).default_height(900).build();
         win.set_child(Some(&stack));
 
+        let save = load();
+        let zones = save.zones.clone();
+
         let ui = Rc::new(Ui {
-            save: RefCell::new(load()), active: Cell::new(None), confirm_del: Cell::new(None),
-            realms: make_realms(), zones: load_zones(), opps: RefCell::new(vec![]),
+            save: RefCell::new(save), active: Cell::new(None), confirm_del: Cell::new(None),
+            realms: make_realms(), zones, opps: RefCell::new(vec![]),
             store: RefCell::new(vec![]), store_key: Cell::new((usize::MAX, 0)),
+            honor_stock: RefCell::new(vec![]), honor_key: Cell::new((usize::MAX, 0)),
             stack, sel_list, title, xp_bar, stats, hp_bar, mana_bar, sta_bar, pot_btn,
             giver, entry, goal, qkind, quest_level, tier, cat, chain, qlist, status,
             zsearch, zkind, zcount, zlist, pvp_head, pvp_faction, pvp_result, pvp_list, log_filter, log_view, sheet, ab_list,
             eq_sum, eq_paperdoll, eq_list, bag_head, bag_list, store_gold, store_pots, store_list,
+            honor_lbl, honor_list, smith_lbl, smith_all, smith_list,
         });
 
         { let u = ui.clone(); sel_new.connect_clicked(move |_| u.show_create()); }
@@ -290,6 +333,7 @@ impl Ui {
         { let u = ui.clone(); ui.zsearch.connect_changed(move |_| u.refresh_zones()); }
         { let u = ui.clone(); ui.zkind.connect_selected_notify(move |_| u.refresh_zones()); }
         { let u = ui.clone(); ui.log_filter.connect_selected_notify(move |_| u.refresh_logs()); }
+        { let u = ui.clone(); ui.smith_all.connect_clicked(move |_| u.repair_all()); }
         for (k, b) in ui.pot_btn.iter().enumerate() {
             let u = ui.clone();
             b.connect_clicked(move |_| u.drink(k));
@@ -311,8 +355,8 @@ impl Ui {
         self.active.set(None);
         self.confirm_del.set(None);
         self.store_key.set((usize::MAX, 0));
+        self.honor_key.set((usize::MAX, 0));
         self.refresh_select();
         self.stack.set_visible_child_name("select");
     }
 }
-

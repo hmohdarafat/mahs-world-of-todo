@@ -1,4 +1,3 @@
-
 //! Application-wide configuration and gameplay constants.
 
 pub(crate) const APP_TITLE: &str = "MAH's World of Todo";
@@ -26,9 +25,18 @@ pub(crate) const CATS: [&str; 14] = [
 ];
 pub(crate) const LOG_FILTERS: [&str; 8] = ["All", "Quest", "Loot", "Level", "Achievement", "PvP", "Travel", "System"];
 pub(crate) const PVP_FACTIONS: [&str; 3] = ["All", "Alliance", "Horde"];
-pub(crate) const ZONE_KINDS: [&str; 8] = [
-    "All", "Zones", "Dungeons", "Raids", "Battlegrounds", "Arenas", "Cities / Sanctuaries", "World PvP",
+
+// zone generation: 3 zones (one per territory) for every 10 levels
+pub(crate) const ZONE_TERR: [&str; 3] = ["Alliance", "Horde", "Contested"];
+pub(crate) const ZONE_A: [&str; 16] = [
+    "Raven", "Ember", "Thorn", "Mist", "Gloom", "Sun", "Iron", "Moon", "Storm", "Ash", "Crystal",
+    "Whisper", "Wolf", "Amber", "Frost", "Hollow",
 ];
+pub(crate) const ZONE_B: [&str; 14] = [
+    "wood", "vale", "marsh", "peaks", "fields", "coast", "barrens", "glade", "reach", "canyon", "downs", "fen",
+    "ridge", "basin",
+];
+
 pub(crate) const REALM_A: [&str; 12] = [
     "Storm", "Dark", "Silver", "Iron", "Blood", "Frost", "Ember", "Shadow", "Thunder", "Golden", "Moon", "Star",
 ];
@@ -39,11 +47,5 @@ pub(crate) const SYL1: [&str; 12] = ["Ka", "Mor", "Thal", "Zul", "Bren", "Gor", 
 pub(crate) const SYL2: [&str; 10] = ["ga", "di", "we", "ra", "io", "tha", "mar", "ri", "lo", "za"];
 pub(crate) const SYL3: [&str; 8] = ["n", "x", "th", "s", "k", "r", "l", "nd"];
 
-pub(crate) const MOBS: &[&str] = &[
-    "Kobolds", "Murlocs", "Gnolls", "Defias Bandits", "Timber Wolves", "Harpies", "Forest Trolls", "Skeletons",
-    "Ghouls", "Giant Spiders", "Wild Boars", "Ogres", "Imps", "Wraiths", "Scorpids",
-];
-
 // potions: (name, icon)
 pub(crate) const POT: [(&str, &str); 3] = [("Health Potion", "🧪"), ("Mana Potion", "🔷"), ("Stamina Potion", "⚡")];
-

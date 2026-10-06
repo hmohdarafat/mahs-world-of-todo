@@ -1,18 +1,20 @@
-
 use gtk::glib;
 use std::path::PathBuf;
-use crate::{config::MAX_LEVEL, data::{classes::*, items::*}, items::make_item, model::*, utils::*};
+use crate::{
+    config::{MAX_LEVEL, ZONE_TERR}, data::{classes::*, items::*}, items::make_item, model::*, utils::*,
+    world::{fallback_zone, generate_zones, zone_bands},
+};
 
-// ---------- persistence ----------
 pub(crate) fn save_path() -> PathBuf {
     let d = glib::user_data_dir().join("wow-todo");
     let _ = std::fs::create_dir_all(&d);
     d.join("characters.json")
 }
 
-/// Upgrade old saves: old gear system, kill-quest steps, resource bars.
+/// Upgrade old saves: old gear system, kill-quest steps, resource bars, removed zones.
 pub(crate) fn migrate(s: &mut Save) {
     let map: [usize; 6] = [0, 1, 2, 6, S_MAIN, 12];
+    let zones = &s.zones;
     for h in &mut s.heroes {
         for q in &mut h.quests {
             if q.quest_level == 0 {
@@ -42,18 +44,28 @@ pub(crate) fn migrate(s: &mut Save) {
                 msg: "🔧 Old gear converted to the new equipment system.".into(),
             });
         }
-        if h.hp == 0 { h.restore_all(); } else { h.clamp_res(); }
+        if !zones.iter().any(|z| z.name == h.zone) {
+            h.zone = fallback_zone(zones, &h.faction, h.level);
+            h.zone_inst.clear();
+        }
+        // 0 HP is now a valid state; only old saves (no `v2`) treat 0 as "unset".
+        if !h.v2 {
+            if h.hp == 0 { h.restore_all(); }
+            h.v2 = true;
+        }
+        h.clamp_res();
     }
 }
 
 pub(crate) fn load() -> Save {
     let mut s: Save = std::fs::read_to_string(save_path()).ok()
         .and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let regen = s.zones.len() != zone_bands().len() * ZONE_TERR.len();
+    if regen { s.zones = generate_zones(); }
     migrate(&mut s);
+    if regen { persist(&s); }
     s
 }
 pub(crate) fn persist(s: &Save) {
     if let Ok(j) = serde_json::to_string_pretty(s) { let _ = std::fs::write(save_path(), j); }
 }
-
-

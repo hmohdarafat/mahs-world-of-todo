@@ -1,16 +1,16 @@
-
-use crate::{config::*, data::{abilities::*, classes::*, items::*}, items::*, model::*, utils::*};
-
+use crate::{config::*, data::{abilities::*, classes::CLASSES, creatures::*, items::*}, items::*, model::*, quests::Encounter, utils::*};
 impl Hero {
-    pub(crate) fn new(name: String, guild: String, realm: &Realm, faction: &str, race: &str, class: usize, spec: usize) -> Self {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(name: String, guild: String, realm: &Realm, faction: &str, race: &str, class: usize, spec: usize, zone: String) -> Self {
         let mut h = Hero {
             name, guild, realm: realm.name.clone(), realm_tier: realm.tier,
             faction: faction.into(), race: race.into(), class, spec,
             level: 1, xp: 0, gold: 0, talents: 0, done: 0, honor: 0, wins: 0, losses: 0,
-            zone: start_zone(race).into(), zone_inst: String::new(),
+            zone, zone_inst: String::new(),
             gear: vec![None; SLOTS.len()], prof: vec![0; CATS.len() - 1],
             achievements: vec![], quests: vec![], log: vec![], bag: vec![],
             hp: 0, mana: 0, sta: 0, pots: [0; 3],
+            v2: true,
         };
         h.restore_all();
         h
@@ -43,7 +43,7 @@ impl Hero {
 
     pub(crate) fn clamp_res(&mut self) {
         let (a, b, c) = self.maxes();
-        self.hp = self.hp.min(a).max(1);
+        self.hp = self.hp.min(a);
         self.mana = self.mana.min(b);
         self.sta = self.sta.min(c);
     }
@@ -198,27 +198,35 @@ impl Hero {
     /// Quest level is compared with the character level: same-level quests use
     /// the baseline cost; higher-level quests hurt more, and lower-level quests
     /// hurt less.
-    pub(crate) fn apply_quest_cost(&mut self, q: &Quest, msgs: &mut Vec<Msg>) {
+    pub(crate) fn apply_quest_cost(&mut self, q: &Quest, enc: &Encounter, msgs: &mut Vec<Msg>) {
         let (max_hp, max_mana, max_sta) = self.maxes();
-        let diff = q.quest_level as i32 - self.level as i32;
-        let pressure = (100 + diff * 15).clamp(40, 175) as u32;
+        let eff = (q.quest_level + enc.level + 1) / 2;
+        let diff = eff as i32 - self.level as i32;
+        let mut pressure = (100 + diff * 15).clamp(40, 175) as u32;
+        let mu = matchup(CLASSES[self.class].name, enc.ctype);
+        pressure = match mu {
+            Matchup::Easy => pressure * 80 / 100,
+            Matchup::Hard => pressure * 125 / 100,
+            Matchup::Average => pressure,
+        };
 
         let hp_loss = ((max_hp as u64 * 6 * pressure as u64) / 10_000).max(1) as u32;
         let mana_loss = ((max_mana as u64 * 3 * pressure as u64) / 10_000).max(1) as u32;
         let sta_loss = ((max_sta as u64 * 4 * pressure as u64) / 10_000).max(1) as u32;
 
-        self.hp = self.hp.saturating_sub(hp_loss).max(1);
+        self.hp = self.hp.saturating_sub(hp_loss);
         self.mana = self.mana.saturating_sub(mana_loss);
         self.sta = self.sta.saturating_sub(sta_loss);
 
         msgs.push(m("Quest", format!(
-            "⚠ Quest Lv {} vs character Lv {}: -{} HP, -{} mana, -{} stamina",
-            q.quest_level, self.level, hp_loss, mana_loss, sta_loss
+            "⚠ {} (Lv {}, {}) — {} matchup · -{} HP, -{} mana, -{} stamina",
+            enc.name, enc.level, CTYPES[enc.ctype.min(CTYPES.len() - 1)], mu.label(), hp_loss, mana_loss, sta_loss
         )));
+        if self.hp == 0 { self.wear_gear(10, msgs); }
     }
 
     pub(crate) fn loot_one(&mut self, q: &Quest, msgs: &mut Vec<Msg>) {
-        let qual = roll_quality(self.level, q.tier, q.cat, q.bonus);
+        let qual = roll_quality(self.level, q.tier, q.cat, 0);
         let (cl, sp, lv) = (self.class, self.spec, self.level);
         let it = match rnd(100) {
             0..=5 => unusable_item(cl, sp, lv, qual),
@@ -248,35 +256,9 @@ impl Hero {
         }
     }
 
-    pub(crate) fn turn_in(&mut self, q: &Quest) -> Vec<Msg> {
-        let mult = q.tier.mult();
-        // gather quests pay +1% per item gathered on top of the linear scaling
-        let extra = if q.qk == QKind::Gather { q.goal } else { 0 };
-        let pct = 100 + q.bonus + extra;
-        let xp = 25 * q.goal * mult * pct / 100;
-        let mut gold = q.goal * mult * 5 + rnd(10);
-        if (1..=GATHER_MAX).contains(&q.cat) { gold += gold / 2; } // gathering sells ore/herbs
-        gold = gold * pct / 100;
-        if q.cat > 0 { self.prof[q.cat - 1] += q.goal; }
-
-        self.xp += xp; self.gold += gold; self.done += 1;
-        let mut msgs: Vec<Msg> = vec![m("Quest", format!("✔ Quest complete: {} → +{xp} XP, +{gold} gold", q.display()))];
-        if q.bonus > 0 { msgs.push(m("Quest", format!("🗺 {} zone bonus: +{}%", q.zone, q.bonus))); }
-        if extra > 0 { msgs.push(m("Quest", format!("🌿 Big haul bonus: +{extra}%"))); }
-        if q.cat > 0 { msgs.push(m("Quest", format!("🔨 {} skill +{}", CATS[q.cat], q.goal))); }
-
-        // Every completed quest awards at least one equipment item.
-        // Raid and World Boss quests award two. New equipment always goes to the bag.
-        let drops = if matches!(q.tier, Tier::Raid | Tier::WorldBoss) { 2 } else { 1 };
-        for _ in 0..drops {
-            self.loot_one(q, &mut msgs);
-        }
-        if self.done % 20 == 0 {
-            let it = drop_item(self.class, self.spec, self.level, Q_HEIRLOOM);
-            msgs.push(m("Loot", "🏺 Heirloom cache unlocked (every 20 quests)!"));
-            self.receive(it, &mut msgs);
-        }
-
+    /// Adds XP and processes level-ups. Returns true if at least one level was gained.
+    pub(crate) fn gain_xp(&mut self, xp: u32, msgs: &mut Vec<Msg>) -> bool {
+        self.xp += xp;
         let before = self.level;
         while self.xp >= self.need() && self.level < MAX_LEVEL {
             let n = self.need();
@@ -302,11 +284,63 @@ impl Hero {
         if self.level > before {
             self.restore_all();
             msgs.push(m("Level", "💚 HP, mana and stamina fully restored"));
+            true
         } else {
-            self.regen(15);
+            false
         }
+    }
+
+    pub(crate) fn turn_in(&mut self, q: &Quest) -> Vec<Msg> {
+        let mult = q.tier.mult();
+        // gather quests pay +1% per item gathered on top of the linear scaling
+        let extra = if q.qk == QKind::Gather { q.goal } else { 0 };
+        let pct = 100 + q.bonus + extra;
+        let xp = 25 * q.goal * mult * pct / 100;
+        let mut gold = q.goal * mult * 5 + rnd(10);
+        if (1..=GATHER_MAX).contains(&q.cat) { gold += gold / 2; } // gathering sells ore/herbs
+        gold = gold * pct / 100;
+        if q.cat > 0 { self.prof[q.cat - 1] += q.goal; }
+
+        self.gold += gold; self.done += 1;
+        let mut msgs: Vec<Msg> = vec![m("Quest", format!("✔ Quest complete: {} → +{xp} XP, +{gold} gold", q.display()))];
+        if q.bonus > 0 { msgs.push(m("Quest", format!("🗺 {} zone bonus: +{}%", q.zone, q.bonus))); }
+        if extra > 0 { msgs.push(m("Quest", format!("🌿 Big haul bonus: +{extra}%"))); }
+        if q.cat > 0 { msgs.push(m("Quest", format!("🔨 {} skill +{}", CATS[q.cat], q.goal))); }
+
+        // Every completed quest awards at least one equipment item.
+        // Raid and World Boss quests award two. New equipment always goes to the bag.
+        let drops = if matches!(q.tier, Tier::Raid | Tier::WorldBoss) { 2 } else { 1 };
+        for _ in 0..drops {
+            self.loot_one(q, &mut msgs);
+        }
+        if self.done % 20 == 0 {
+            let it = drop_item(self.class, self.spec, self.level, Q_HEIRLOOM);
+            msgs.push(m("Loot", "🏺 Heirloom cache unlocked (every 20 quests)!"));
+            self.receive(it, &mut msgs);
+        }
+
+        if !self.gain_xp(xp, &mut msgs) { self.regen(15); }
         self.check_achievements(&mut msgs);
         msgs
+    }
+
+    pub(crate) fn wear_gear(&mut self, amt: u32, msgs: &mut Vec<Msg>) {
+        let (mut n, mut broken) = (0u32, 0u32);
+        for it in self.gear.iter_mut().flatten() {
+            if it.durability > 0 {
+                it.durability = it.durability.saturating_sub(amt);
+                n += 1;
+                if it.durability == 0 { broken += 1; }
+            }
+        }
+        if n > 0 {
+            msgs.push(m("System", format!("💥 0 HP — equipment durability -{amt} on {n} items{}",
+                if broken > 0 { format!(" ({broken} broken)") } else { String::new() })));
+        }
+    }
+
+    pub(crate) fn repair_total(&self) -> u32 {
+        self.gear.iter().flatten().chain(self.bag.iter()).map(|i| i.repair_cost()).sum()
     }
 
     pub(crate) fn check_achievements(&mut self, msgs: &mut Vec<Msg>) {
@@ -334,6 +368,3 @@ impl Hero {
         }
     }
 }
-
-// ---------- combat ----------
-

@@ -1,4 +1,3 @@
-
 //! Class, specialization, race, and role catalogs.
 
 use crate::{config::*, data::abilities::*, model::*};
@@ -61,23 +60,6 @@ pub(crate) fn races(faction: &str) -> Vec<&'static str> {
     base.iter().chain(NEUTRAL.iter()).copied().collect()
 }
 
-pub(crate) fn start_zone(race: &str) -> &'static str {
-    match race {
-        "Human" => "Elwynn Forest",
-        "Dwarf" | "Gnome" => "Dun Morogh",
-        "Night Elf" => "Teldrassil",
-        "Draenei" => "Azuremyst Isle",
-        "Worgen" => "Gilneas",
-        "Orc" | "Troll" => "Durotar",
-        "Undead (Forsaken)" => "Tirisfal Glades",
-        "Tauren" => "Mulgore",
-        "Blood Elf" => "Eversong Woods",
-        "Goblin" => "Kezan",
-        "Pandaren" => "The Wandering Isle",
-        _ => "The Forbidden Reach",
-    }
-}
-
 pub(crate) fn npcs(f: &str) -> [&'static str; 3] {
     if f == "Horde" { ["Gornek", "Zureetha Fargaze", "Kaltunk"] }
     else { ["Marshal McBride", "Deputy Willem", "Llane Beshere"] }
@@ -87,4 +69,3 @@ pub(crate) fn cat_kind(i: usize) -> &'static str {
     match i { 0 => "general task", 1..=GATHER_MAX => "gathering", _ => "crafting" }
 }
 pub(crate) fn fcol(f: &str) -> &'static str { if f == "Horde" { "#e0453a" } else { "#4a8fe7" } }
-

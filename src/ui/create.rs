@@ -1,7 +1,6 @@
-
 use std::rc::Rc;
 use gtk::prelude::*;
-use crate::{config::*, data::classes::*, model::*, persistence::*, utils::*};
+use crate::{config::*, data::{classes::*, creatures::matchup_markup}, model::*, persistence::*, utils::*, world::starting_zone};
 use super::{common::labeled, Ui};
 
 pub(crate) fn create_screen(ui: &Rc<Ui>) -> gtk::Box {
@@ -22,11 +21,11 @@ pub(crate) fn create_screen(ui: &Rc<Ui>) -> gtk::Box {
         let name = gtk::Entry::new(); name.set_placeholder_text(Some("Character name"));
         let guild = gtk::Entry::new(); guild.set_placeholder_text(Some("Guild (optional)"));
         let info = gtk::Label::new(None);
+        let mu = gtk::Label::new(None); mu.set_xalign(0.0); mu.set_wrap(true);
         info.set_xalign(0.0); info.set_wrap(true); info.add_css_class("dim-label");
 
         let upd: Rc<dyn Fn()> = {
-            let (c, s, i) = (class.clone(), spec.clone(), info.clone());
-            Rc::new(move || {
+        let (c, s, i, mu2) = (class.clone(), spec.clone(), info.clone(), mu.clone());            Rc::new(move || {
                 let cl = &CLASSES[(c.selected() as usize).min(CLASSES.len() - 1)];
                 let si = (s.selected() as usize).min(cl.specs.len() - 1);
                 let mut roles: Vec<&str> = vec![];
@@ -37,6 +36,7 @@ pub(crate) fn create_screen(ui: &Rc<Ui>) -> gtk::Box {
                 i.set_text(&format!(
                     "{} armor · {} · weapons: {}\nclass roles: {} · selected spec role: {}",
                     cl.armor, offhand_text(cl), weapons.join(", "), roles.join(", "), cl.specs[si].1.name()));
+                    mu2.set_markup(&matchup_markup(cl.name));
             })
         };
         {
@@ -70,6 +70,7 @@ pub(crate) fn create_screen(ui: &Rc<Ui>) -> gtk::Box {
         b.append(&labeled("4. Choose class", &class));
         b.append(&labeled("5. Choose specialization", &spec));
         b.append(&info);
+        b.append(&mu);
         b.append(&labeled("6. Create identity", &name));
         b.append(&guild);
         b.append(&go);
@@ -88,7 +89,8 @@ pub(crate) fn create_screen(ui: &Rc<Ui>) -> gtk::Box {
             let race_name = rl[(race.selected() as usize).min(rl.len() - 1)];
             let ci = (class.selected() as usize).min(CLASSES.len() - 1);
             let si = (spec.selected() as usize).min(CLASSES[ci].specs.len() - 1);
-            let hero = Hero::new(n.clone(), guild.text().trim().to_string(), &u.realms[ri], fac, race_name, ci, si);
+            let zone = starting_zone(&u.zones, fac);
+            let hero = Hero::new(n.clone(), guild.text().trim().to_string(), &u.realms[ri], fac, race_name, ci, si, zone);
             let idx = {
                 let mut s = u.save.borrow_mut();
                 s.heroes.push(hero);
@@ -101,4 +103,3 @@ pub(crate) fn create_screen(ui: &Rc<Ui>) -> gtk::Box {
         });
         b
     }
-

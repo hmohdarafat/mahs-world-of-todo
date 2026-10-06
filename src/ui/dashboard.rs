@@ -1,7 +1,6 @@
-
 use std::rc::Rc;
 use gtk::{glib, prelude::*};
-use crate::{config::*, data::{abilities::*, classes::*, items::SLOTS}, model::*, persistence::*, quests::*, utils::*};
+use crate::{config::*, data::{abilities::*, classes::*, creatures::matchup_markup, items::SLOTS}, model::*, persistence::*, quests::*, utils::*};
 use super::{Ui, pad, set_bar, set_options};
 
 impl Ui {
@@ -54,8 +53,14 @@ impl Ui {
                 }
                 self.stats.set_text(&format!("💰 {} gold   ✨ Talents: {}   🎖 Honor: {}", h.gold, h.talents, h.honor));
 
-                self.giver.set_text(&format!("Find an NPC in {} and accept a quest:", h.zone));
-                let (quest_min, quest_max) = quest_level_bounds(h.level);
+                let zref = self.zones.iter().find(|z| z.name == h.zone);
+                let zinfo = zref.map_or(String::new(), |z| {
+                    let r = z.relation(&h.faction);
+                    format!(" (Lv {} · {} · +{}% XP · {}% chance of higher-level creatures)",
+                            z.level_text(), r.name(), r.xp_bonus(), r.high_chance())
+                });
+                self.giver.set_text(&format!("Find an NPC in {}{zinfo} and accept a quest:", h.zone));
+                let (quest_min, quest_max) = quest_level_bounds(h.level, zref);
                 let previous_level = self.quest_level.model()
                     .and_then(|m| m.downcast::<gtk::StringList>().ok())
                     .and_then(|sl| sl.string(self.quest_level.selected()).map(|v| v.as_str().trim_start_matches("Lv ").parse::<u32>().ok()).flatten())
@@ -97,6 +102,8 @@ impl Ui {
                 t += &format!("<b>Combat overview</b>\nHP {}/{} · Mana {}/{} · Stamina {}/{}\n", h.hp, st.hp, h.mana, st.mana, h.sta, st.sta);
                 t += &format!("ATK {} · DEF {} · Crit {}% · Regen {}/round · avg ilvl {}\n", st.atk, st.def, st.crit, st.heal, f.ilvl_avg());
                 t += &format!("{} armor · {} · {}\n\n", c.armor, role.name(), f.setup());
+                t += &matchup_markup(c.name);
+                t += "\n\n";
                 t += &f.stat_breakdown();
                 t += "\n<b>Exact equipment contribution by slot</b>\n";
                 for (i, slot) in SLOTS.iter().enumerate() {
@@ -125,6 +132,8 @@ impl Ui {
             }
             self.refresh_equipment();
             self.refresh_store();
+            self.refresh_honor_store();
+            self.refresh_blacksmith();
             self.refresh_zones();
             self.refresh_logs();
         }
@@ -160,4 +169,3 @@ impl Ui {
         }
 
 }
-

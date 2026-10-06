@@ -1,7 +1,6 @@
-
 use std::rc::Rc;
 use gtk::{glib, prelude::*};
-use crate::{config::*, data::classes::*, model::*, persistence::*, quests::*, utils::*, world::*};
+use crate::{config::*, data::classes::*, model::*, persistence::*, quests::*, utils::*};
 use super::{Ui, pad};
 
 impl Ui {
@@ -103,8 +102,9 @@ impl Ui {
                     msgs.push(m("Quest", format!("Objective complete! Return to {giver} and turn in the quest.")));
                 }
                 let quest_snapshot = h.quests[qi].clone();
+                let enc = encounter_for(&quest_snapshot, self.zones.iter().find(|z| z.name == quest_snapshot.zone), &h.faction, h.level);
                 h.step_drop(&mut msgs, STEP_DROP);
-                h.apply_quest_cost(&quest_snapshot, &mut msgs);
+                h.apply_quest_cost(&quest_snapshot, &enc, &mut msgs);
             }
             self.finish(msgs);
         }
@@ -148,7 +148,8 @@ impl Ui {
                 } else if ci > 0 && h.level < PROF_LEVEL {
                     Err(format!("🔒 Professions unlock at level {PROF_LEVEL}."))
                 } else {
-                    let (min_level, max_level) = quest_level_bounds(h.level);
+                    let zref = self.zones.iter().find(|z| z.name == h.zone);
+                    let (min_level, max_level) = quest_level_bounds(h.level, zref);
                     let quest_level = (min_level + self.quest_level.selected()).clamp(min_level, max_level);
                     let giver = pick(&npcs(&h.faction)).to_string();
                     let qk = match self.qkind.selected() {
@@ -156,15 +157,16 @@ impl Ui {
                         _ => QKind::Kill,
                     };
                     let g = (self.goal.value() as u32).clamp(1, MAX_QGOAL);
-                    let (goal, target, steps) = match qk {
-                        QKind::Kill => (g, ps(MOBS).to_string(), make_steps(g)),
-                        QKind::Gather => (g, gather_item(ci), vec![]),
+                    let (goal, target, steps, ctype) = match qk {
+                        QKind::Kill => { let (t, ct) = kill_target(zref, tier); (g, t, make_steps(g), Some(ct)) }
+                        QKind::Gather => (g, gather_item(ci), vec![], None),
                     };
+                    let bonus = zref.map_or(0, |z| z.relation(&h.faction).xp_bonus());
                     let q = Quest {
                         title, giver: giver.clone(), tier, cat: ci, goal, progress: 0,
                         chain: self.chain.is_active(), part: 1, quest_level,
-                        zone: h.zone.clone(), bonus: inst_bonus(&h.zone_inst),
-                        qk, target, steps, tries: 0,
+                        zone: h.zone.clone(), bonus,
+                        qk, target, steps, tries: 0, ctype,
                     };
                     let msg = m("Quest", format!("📜 {giver} ({}): \"{}\" — quest accepted!", q.zone, q.display()));
                     h.quests.push(q);
@@ -182,7 +184,7 @@ impl Ui {
             }
         }
 
-        /// Gather quests: ⚔ +1 tries to find the item. Any quest: turn in when complete.
+        /// Gather quests: ⚔ +1 tries to find the item (zone creatures ambush you). Any quest: turn in when complete.
         pub(crate) fn act(self: &Rc<Self>, i: usize) {
             let Some(a) = self.active.get() else { return };
             let msgs = {
@@ -199,17 +201,19 @@ impl Ui {
                         if got { q.progress += 1; }
                         (q.display(), q.progress, q.goal, q.target.clone(), q.giver.clone())
                     };
-                    let mut v = vec![if got {
+                    let snap = h.quests[i].clone();
+                    let enc = encounter_for(&snap, self.zones.iter().find(|z| z.name == snap.zone), &h.faction, h.level);
+                    let mut v = vec![m("Quest", format!("⚔ {} (Lv {}) ambushes you while you search for {tgt}!", enc.name, enc.level))];
+                    v.push(if got {
                         m("Quest", format!("⚔ {disp} — found {tgt} ({p}/{g})"))
                     } else {
                         m("Quest", format!("💨 {disp} — nothing this time ({p}/{g})"))
-                    }];
+                    });
                     if got && p >= g {
                         v.push(m("Quest", format!("Objective complete! Return to {giver} and turn in the quest.")));
                     }
-                    let quest_snapshot = h.quests[i].clone();
                     h.step_drop(&mut v, GATHER_DROP);
-                    h.apply_quest_cost(&quest_snapshot, &mut v);
+                    h.apply_quest_cost(&snap, &enc, &mut v);
                     v
                 } else {
                     let q = h.quests.remove(i);
@@ -239,4 +243,3 @@ impl Ui {
 
         // ----- PvP
 }
-

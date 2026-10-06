@@ -1,4 +1,3 @@
-
 use std::rc::Rc;
 use gtk::{glib, prelude::*};
 use crate::{config::*, data::{classes::*, items::*}, items::*, model::*, utils::*};
@@ -23,7 +22,7 @@ fn slot_card(slot_index: usize, item: Option<&Item>) -> gtk::Frame {
             name.set_xalign(0.0);
             name.set_wrap(true);
             name.set_markup(&format!("<span foreground='{}'><b>{}</b></span>", QCOL[it.quality.min(6)], glib::markup_escape_text(it.name.as_str())));
-            let detail = gtk::Label::new(Some(&format!("{} · ilvl {} · {}", quality, it.ilvl, it.stats_inline())));
+            let detail = gtk::Label::new(Some(&format!("{} · ilvl {} · Dur {}/100 · {}", quality, it.ilvl, it.durability, it.stats_inline())));
             detail.set_xalign(0.0);
             detail.set_wrap(true);
             detail.add_css_class("dim-label");
@@ -106,6 +105,7 @@ impl Ui {
                         name: String::new(), quality: 0, ilvl: 0, slot: 0,
                         kind: Kind::Cosmetic, wt: None, hands: Hands::One,
                         stats: vec![(i, *value)], suffix: None,
+                        durability: 100,
                     };
                     pseudo.stat_impact_text(h.class, h.spec)
                 })
@@ -291,6 +291,65 @@ impl Ui {
             self.finish(msgs);
         }
 
+        // ----- honor store
+        pub(crate) fn refresh_honor_store(self: &Rc<Self>) {
+            while let Some(c) = self.honor_list.first_child() { self.honor_list.remove(&c); }
+            let Some(a) = self.active.get() else { return };
+            let s = self.save.borrow();
+            let Some(h) = s.heroes.get(a) else { return };
+            if self.honor_key.get() != (a, h.level) {
+                *self.honor_stock.borrow_mut() = gen_honor_store(h.class, h.spec, h.level);
+                self.honor_key.set((a, h.level));
+            }
+            self.honor_lbl.set_text(&format!("🎖 You have {} honor · bag {}/{}", h.honor, h.bag.len(), BAG_MAX));
+            let stock = self.honor_stock.borrow();
+            if stock.is_empty() { self.honor_list.append(&gtk::Label::new(Some("Sold out."))); }
+            for (i, it) in stock.iter().enumerate() {
+                let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+                let lbl = gtk::Label::new(None);
+                lbl.set_xalign(0.0); lbl.set_hexpand(true);
+                let up = if h.is_upgrade(it) { "<span foreground='#3fb950'>▲</span> " } else { "" };
+                lbl.set_markup(&format!(
+                    "{up}{}\n<small>ilvl {} · {} · {}</small>",
+                    qspan(it.quality, it.name.as_str()), it.ilvl,
+                    glib::markup_escape_text(it.type_label().as_str()),
+                    glib::markup_escape_text(it.stats_inline().as_str())));
+                lbl.set_tooltip_text(Some(&it.tip()));
+                let price = it.honor_price();
+                let b = gtk::Button::with_label(&format!("Buy {price} 🎖"));
+                b.set_valign(gtk::Align::Center);
+                b.set_sensitive(h.honor >= price);
+                { let u = self.clone(); b.connect_clicked(move |_| u.buy_honor(i)); }
+                row.append(&lbl); row.append(&b);
+                self.honor_list.append(&row);
+            }
+        }
+
+        pub(crate) fn buy_honor(self: &Rc<Self>, i: usize) {
+            let Some(a) = self.active.get() else { return };
+            let it = {
+                let st = self.honor_stock.borrow();
+                match st.get(i) { Some(x) => x.clone(), None => return }
+            };
+            let price = it.honor_price();
+            let mut msgs: Vec<Msg> = vec![];
+            {
+                let mut s = self.save.borrow_mut();
+                let Some(h) = s.heroes.get_mut(a) else { return };
+                if h.honor < price {
+                    msgs.push(m("System", format!("🎖 Not enough honor — {} costs {price}.", it.name)));
+                } else if h.bag.len() >= BAG_MAX {
+                    msgs.push(m("Loot", "🎒 Bag is full — sell something first."));
+                } else {
+                    h.honor -= price;
+                    msgs.push(m("Loot", format!("🎖 Bought {} for {price} honor", it.label())));
+                    h.bag.push(it);
+                    self.honor_stock.borrow_mut().remove(i);
+                }
+            }
+            self.finish(msgs);
+        }
+
         pub(crate) fn drink(self: &Rc<Self>, k: usize) {
             let Some(a) = self.active.get() else { return };
             let mut msgs: Vec<Msg> = vec![];
@@ -394,4 +453,3 @@ impl Ui {
         }
 
 }
-

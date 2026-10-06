@@ -1,4 +1,3 @@
-
 use gtk::glib;
 use crate::{config::*, data::{classes::*, items::*}, model::*, utils::*};
 use crate::model::{Role::{Healer, Ranged, Tank}, Wt::{Axe, Bow, Crossbow, Dagger, Fist, Gun, Mace, Polearm, Staff, Sword, Wand, Warglaive}};
@@ -9,6 +8,12 @@ pub(crate) fn qspan(q: usize, text: &str) -> String {
 }
 
 impl Item {
+
+    pub(crate) fn repair_cost(&self) -> u32 {
+        let missing = 100u32.saturating_sub(self.durability);
+        if missing == 0 { 0 } else { ((self.ilvl * 3 + 10) * missing / 100).max(1) }
+    }
+
     pub(crate) fn is_two(&self) -> bool { self.kind == Kind::Weapon && self.hands == Hands::Two }
 
     pub(crate) fn type_label(&self) -> String {
@@ -38,6 +43,11 @@ impl Item {
         let il = self.ilvl;
         let base = il * 4 + il * il / 4 + 10;
         (base * QBUY[self.quality.min(6)] / 100).max(5)
+    }
+
+    /// Honor store price: grows with item level; Epic and better cost double.
+    pub(crate) fn honor_price(&self) -> u32 {
+        (20 + self.ilvl * 3) * if self.quality >= 4 { 2 } else { 1 }
     }
 
     pub(crate) fn stats_inline(&self) -> String {
@@ -90,9 +100,10 @@ impl Item {
                     .collect::<Vec<_>>().join("\n")
             };
         let sell = if self.sell_value() == 0 { "Soulbound — can't be sold".to_string() }
-                   else { format!("Sells for {} gold", self.sell_value()) };
-        format!("{}\n[{}] · ilvl {} · {}\n{}\n{}\n{}",
-                self.name, QUALITY[self.quality.min(6)], self.ilvl, self.type_label(), self.affix_text(), body, sell)
+                else { format!("Sells for {} gold", self.sell_value()) };
+        format!("{}\n[{}] · ilvl {} · {}\n{}\n{}\nDurability {}/100\n{}",
+                self.name, QUALITY[self.quality.min(6)], self.ilvl, self.type_label(), self.affix_text(), body,
+                self.durability, sell)
     }
 }
 
@@ -282,7 +293,7 @@ pub(crate) fn build(class: usize, spec: usize, level: u32, kind: Kind, slot: usi
         else { (level as i32 + 2 + QILVL[q.min(6)] + rnd(3) as i32).max(1) as u32 };
     let (name, suffix) = gen_name(q, kind, slot, wt, hands, ai);
     let stats = if kind == Kind::Cosmetic { vec![] } else { roll_stats(q, ilvl, class, spec, suffix) };
-    Item { name, quality: q, ilvl, slot, kind, wt, hands, stats, suffix }
+    Item { name, quality: q, ilvl, slot, kind, wt, hands, stats, suffix, durability: 100 }
 }
 
 pub(crate) fn pick_weapon(class: usize, spec: usize) -> (Wt, Hands) {
@@ -451,5 +462,17 @@ pub(crate) fn gen_store(class: usize, spec: usize, level: u32) -> Vec<Item> {
     v
 }
 
-pub(crate) fn potion_price(level: u32) -> u32 { 6 + level * 2 }
+/// Honor store stock: Rare gear below level 40, Epic from level 40, usable by the class.
+pub(crate) fn gen_honor_store(class: usize, spec: usize, level: u32) -> Vec<Item> {
+    let q = if level >= 40 { 4 } else { 3 };
+    let mut v: Vec<Item> = vec![];
+    let mut tries = 0;
+    while v.len() < STORE_SIZE && tries < 300 {
+        tries += 1;
+        if let Some(it) = make_item(class, spec, level + 2, random_cat(), q) { v.push(it); }
+    }
+    v.sort_by_key(|i| (i.slot, std::cmp::Reverse(i.quality)));
+    v
+}
 
+pub(crate) fn potion_price(level: u32) -> u32 { 6 + level * 2 }

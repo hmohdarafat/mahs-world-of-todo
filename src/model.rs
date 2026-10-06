@@ -1,4 +1,3 @@
-
 //! Domain types shared by game systems and the GTK layer.
 
 use serde::{Deserialize, Serialize};
@@ -67,8 +66,14 @@ pub(crate) struct Class {
 }
 
 pub(crate) struct Realm { pub(crate) name: String, pub(crate) pop: u32, pub(crate) tier: usize }
-#[derive(Clone)]
-pub(crate) struct Zone { pub(crate) name: String, pub(crate) lo: u32, pub(crate) hi: u32, pub(crate) terr: String, pub(crate) inst: String }
+
+/// A generated zone. Holds 1-3 creature types (indices into `CTYPES`) and the creatures living there.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct Zone {
+    pub(crate) name: String, pub(crate) lo: u32, pub(crate) hi: u32, pub(crate) terr: String,
+    pub(crate) types: Vec<usize>,
+    pub(crate) creatures: Vec<(usize, String)>, // (type index, creature name)
+}
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub(crate) enum Tier { Normal, Elite, Dungeon, Raid, WorldBoss }
@@ -85,6 +90,8 @@ pub(crate) struct Quest {
     #[serde(default)] pub(crate) zone: String, #[serde(default)] pub(crate) bonus: u32, #[serde(default)] pub(crate) qk: QKind,
     #[serde(default)] pub(crate) quest_level: u32,
     #[serde(default)] pub(crate) target: String, #[serde(default)] pub(crate) steps: Vec<Step>, #[serde(default)] pub(crate) tries: u32,
+    // Quest: add field
+    #[serde(default)] pub(crate) ctype: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -94,6 +101,7 @@ pub(crate) struct Item {
     #[serde(default)] pub(crate) hands: Hands, #[serde(default)] pub(crate) stats: Vec<(usize, u32)>,
     /// Stat-bearing named suffix used to generate this item's stats; omitted by older saves.
     #[serde(default)] pub(crate) suffix: Option<usize>,
+    #[serde(default = "full_dur")] pub(crate) durability: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -108,10 +116,14 @@ pub(crate) struct Hero {
     pub(crate) gear: Vec<Option<Item>>, pub(crate) prof: Vec<u32>, pub(crate) achievements: Vec<String>, pub(crate) quests: Vec<Quest>, pub(crate) log: Vec<LogEntry>,
     #[serde(default)] pub(crate) bag: Vec<Item>, #[serde(default)] pub(crate) hp: u32, #[serde(default)] pub(crate) mana: u32,
     #[serde(default)] pub(crate) sta: u32, #[serde(default)] pub(crate) pots: [u32; 3],
+    #[serde(default)] pub(crate) v2: bool,
 }
 
 #[derive(Serialize, Deserialize, Default)]
-pub(crate) struct Save { pub(crate) heroes: Vec<Hero> }
+pub(crate) struct Save {
+    pub(crate) heroes: Vec<Hero>,
+    #[serde(default)] pub(crate) zones: Vec<Zone>,
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct Stats { pub(crate) hp: u32, pub(crate) atk: u32, pub(crate) def: u32, pub(crate) crit: u32, pub(crate) heal: u32, pub(crate) mana: u32, pub(crate) sta: u32, pub(crate) hmul: u32 }
@@ -131,3 +143,7 @@ pub(crate) struct Side {
 
 pub(crate) struct Duel { pub(crate) won: bool, pub(crate) lines: Vec<String>, pub(crate) hp: u32, pub(crate) mana: u32, pub(crate) sta: u32 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Rel { Same, Contested, Opposite }
+
+fn full_dur() -> u32 { 100 }

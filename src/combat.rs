@@ -156,6 +156,7 @@ impl Fighter {
                 name: String::new(), quality: 0, ilvl: 0, slot: 0,
                 kind: Kind::Cosmetic, wt: None, hands: Hands::One,
                 stats: vec![(i, tot[i])], suffix: None,
+                durability: 100,
             };
             one.stat_impact_text(self.class, self.spec)
         };

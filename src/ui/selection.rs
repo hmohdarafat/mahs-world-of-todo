@@ -1,4 +1,3 @@
-
 use std::rc::Rc;
 use gtk::{glib, prelude::*};
 use crate::{data::classes::*, persistence::persist, utils::*};
@@ -54,6 +53,7 @@ impl Ui {
         pub(crate) fn enter(self: &Rc<Self>, i: usize) {
             self.confirm_del.set(None);
             self.store_key.set((usize::MAX, 0));
+            self.honor_key.set((usize::MAX, 0));
             let (realm, pop) = {
                 let s = self.save.borrow();
                 let Some(h) = s.heroes.get(i) else { return };
@@ -66,4 +66,3 @@ impl Ui {
         }
 
 }
-
