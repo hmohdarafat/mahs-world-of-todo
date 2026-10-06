@@ -4,14 +4,91 @@ use gtk::{glib, prelude::*};
 use crate::{config::*, data::{classes::*, items::*}, items::*, model::*, utils::*};
 use super::Ui;
 
+fn rarity_class(q: usize) -> String { format!("gear-quality-{}", q.min(6)) }
+
+fn slot_card(slot_index: usize, item: Option<&Item>) -> gtk::Frame {
+    let slot = SLOTS[slot_index];
+    let frame = gtk::Frame::new(None);
+    frame.add_css_class("gear-slot");
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    let head = gtk::Label::new(None);
+    head.set_xalign(0.0);
+    head.set_hexpand(true);
+    match item {
+        Some(it) => {
+            frame.add_css_class(&rarity_class(it.quality));
+            let quality = QUALITY[it.quality.min(6)];
+            head.set_markup(&format!("<b>{}</b>", glib::markup_escape_text(slot)));
+            let name = gtk::Label::new(None);
+            name.set_xalign(0.0);
+            name.set_wrap(true);
+            name.set_markup(&format!("<span foreground='{}'><b>{}</b></span>", QCOL[it.quality.min(6)], glib::markup_escape_text(it.name.as_str())));
+            let detail = gtk::Label::new(Some(&format!("{} · ilvl {} · {}", quality, it.ilvl, it.stats_inline())));
+            detail.set_xalign(0.0);
+            detail.set_wrap(true);
+            detail.add_css_class("dim-label");
+            body.append(&head);
+            body.append(&name);
+            body.append(&detail);
+            frame.set_tooltip_text(Some(&it.tip()));
+        }
+        None => {
+            frame.add_css_class("gear-empty");
+            head.set_markup(&format!("<b>{}</b>", glib::markup_escape_text(slot)));
+            let empty = gtk::Label::new(Some("Empty"));
+            empty.set_xalign(0.0);
+            empty.add_css_class("dim-label");
+            body.append(&head);
+            body.append(&empty);
+        }
+    }
+    frame.set_child(Some(&body));
+    frame
+}
+
+fn paperdoll(h: &Hero) -> gtk::Box {
+    let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    root.set_halign(gtk::Align::Center);
+
+    let left_slots = [0usize, 1, 8, 3, 4, S_MAIN];
+    let center_slots = [9usize, 2, 5, 6, 7];
+    let right_slots = [10usize, 11, 12, 13, S_OFF];
+
+    let make_column = |slots: &[usize]| {
+        let col = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        col.set_valign(gtk::Align::Center);
+        for &slot in slots {
+            col.append(&slot_card(slot, h.gear.get(slot).and_then(|x| x.as_ref())));
+        }
+        col
+    };
+
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    row.set_halign(gtk::Align::Center);
+    row.append(&make_column(&left_slots));
+    row.append(&make_column(&center_slots));
+    row.append(&make_column(&right_slots));
+    root.append(&row);
+
+    let legend = gtk::Label::new(Some(
+        "Poor · Common · Uncommon · Rare · Epic · Legendary · Heirloom",
+    ));
+    legend.set_xalign(0.5);
+    legend.add_css_class("dim-label");
+    root.append(&legend);
+    root
+}
+
 impl Ui {
         pub(crate) fn refresh_equipment(self: &Rc<Self>) {
+            while let Some(c) = self.eq_paperdoll.first_child() { self.eq_paperdoll.remove(&c); }
             while let Some(c) = self.eq_list.first_child() { self.eq_list.remove(&c); }
             while let Some(c) = self.bag_list.first_child() { self.bag_list.remove(&c); }
             let Some(a) = self.active.get() else { return };
             let s = self.save.borrow();
             let Some(h) = s.heroes.get(a) else { return };
             let f = h.fighter();
+            self.eq_paperdoll.append(&paperdoll(h));
             let cls = &CLASSES[h.class];
             let weapons: Vec<&str> = cls.weapons.iter().map(|w| w.name()).collect();
             let filled = h.gear.iter().flatten().count();

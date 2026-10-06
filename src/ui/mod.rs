@@ -42,7 +42,7 @@ pub(crate) struct Ui {
     pub(crate) pvp_head: gtk::Label, pvp_faction: gtk::DropDown, pvp_result: gtk::Label, pvp_list: gtk::Box,
     pub(crate) log_filter: gtk::DropDown, log_view: gtk::TextView,
     pub(crate) sheet: gtk::Label, ab_list: gtk::Box,
-    pub(crate) eq_sum: gtk::Label, eq_list: gtk::Box, bag_head: gtk::Label, bag_list: gtk::Box,
+    pub(crate) eq_sum: gtk::Label, eq_paperdoll: gtk::Box, eq_list: gtk::Box, bag_head: gtk::Label, bag_list: gtk::Box,
     pub(crate) store_gold: gtk::Label, store_pots: gtk::Box, store_list: gtk::Box,
 }
 
@@ -56,7 +56,17 @@ impl Ui {
         css.load_from_data(
             "progressbar.hp-bar progress { background: #c0392b; } \
              progressbar.mana-bar progress { background: #2e86de; } \
-             progressbar.sta-bar progress { background: #d4a017; }",
+             progressbar.sta-bar progress { background: #d4a017; } \
+             frame.gear-slot { padding: 6px; border-radius: 8px; background: #101722; min-width: 145px; } \
+             frame.gear-slot label { color: #e6edf3; } \
+             frame.gear-empty { border: 2px solid #30363d; } \
+             frame.gear-quality-0 { border: 2px solid #9d9d9d; background: rgba(157,157,157,0.08); } \
+             frame.gear-quality-1 { border: 2px solid #ffffff; background: rgba(255,255,255,0.06); } \
+             frame.gear-quality-2 { border: 2px solid #1eff00; background: rgba(30,255,0,0.08); } \
+             frame.gear-quality-3 { border: 2px solid #0070dd; background: rgba(0,112,221,0.10); } \
+             frame.gear-quality-4 { border: 2px solid #a335ee; background: rgba(163,53,238,0.12); } \
+             frame.gear-quality-5 { border: 2px solid #ff8000; background: rgba(255,128,0,0.12); } \
+             frame.gear-quality-6 { border: 2px solid #00ccff; background: rgba(0,204,255,0.12); }",
         );
         if let Some(d) = gtk::gdk::Display::default() {
             gtk::style_context_add_provider_for_display(&d, &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -172,6 +182,7 @@ impl Ui {
 
         // ----- equipment tab
         let eq_sum = gtk::Label::new(None); eq_sum.set_xalign(0.0); eq_sum.set_wrap(true);
+        let eq_paperdoll = gtk::Box::new(ve, 8);
         let eq_list = gtk::Box::new(ve, 4);
         let eq_title = gtk::Label::new(None); eq_title.set_markup("<b>Equipped</b>"); eq_title.set_xalign(0.0);
         let bag_head = gtk::Label::new(None); bag_head.set_xalign(0.0); bag_head.set_hexpand(true);
@@ -185,7 +196,7 @@ impl Ui {
         guide.set_child(Some(&guide_lbl));
         let eq_inner = gtk::Box::new(ve, 8);
         pad(&eq_inner, 10);
-        eq_inner.append(&eq_sum); eq_inner.append(&guide); eq_inner.append(&eq_title);
+        eq_inner.append(&eq_sum); eq_inner.append(&guide); eq_inner.append(&eq_paperdoll); eq_inner.append(&eq_title);
         eq_inner.append(&eq_list); eq_inner.append(&bag_row); eq_inner.append(&bag_list);
         let eq_scroll = gtk::ScrolledWindow::builder().vexpand(true).child(&eq_inner).build();
 
@@ -263,7 +274,7 @@ impl Ui {
             stack, sel_list, title, xp_bar, stats, hp_bar, mana_bar, sta_bar, pot_btn,
             giver, entry, goal, qkind, quest_level, tier, cat, chain, qlist, status,
             zsearch, zkind, zcount, zlist, pvp_head, pvp_faction, pvp_result, pvp_list, log_filter, log_view, sheet, ab_list,
-            eq_sum, eq_list, bag_head, bag_list, store_gold, store_pots, store_list,
+            eq_sum, eq_paperdoll, eq_list, bag_head, bag_list, store_gold, store_pots, store_list,
         });
 
         { let u = ui.clone(); sel_new.connect_clicked(move |_| u.show_create()); }
