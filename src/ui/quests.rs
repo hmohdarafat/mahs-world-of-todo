@@ -102,8 +102,7 @@ impl Ui {
                     msgs.push(m("Quest", format!("Objective complete! Return to {giver} and turn in the quest.")));
                 }
                 let quest_snapshot = h.quests[qi].clone();
-                let enc = encounter_for(&quest_snapshot, self.zones.iter().find(|z| z.name == quest_snapshot.zone), &h.faction, h.level);
-                h.step_drop(&mut msgs, STEP_DROP);
+                let enc = encounter_for(&quest_snapshot, h.zone_named(&quest_snapshot.zone), &h.faction, h.level);                h.step_drop(&mut msgs, STEP_DROP);
                 h.apply_quest_cost(&quest_snapshot, &enc, &mut msgs);
             }
             self.finish(msgs);
@@ -148,7 +147,7 @@ impl Ui {
                 } else if ci > 0 && h.level < PROF_LEVEL {
                     Err(format!("🔒 Professions unlock at level {PROF_LEVEL}."))
                 } else {
-                    let zref = self.zones.iter().find(|z| z.name == h.zone);
+                    let zref = h.zone_ref();
                     let (min_level, max_level) = quest_level_bounds(h.level, zref);
                     let quest_level = (min_level + self.quest_level.selected()).clamp(min_level, max_level);
                     let giver = pick(&npcs(&h.faction)).to_string();

@@ -24,7 +24,7 @@ impl Ui {
             let q = self.zsearch.text().to_lowercase();
             let kind = self.zkind.selected();
             // every zone is always listed, regardless of level or faction
-            let mut shown: Vec<&Zone> = self.zones.iter()
+            let mut shown: Vec<&Zone> = h.zones.iter()
                 .filter(|z| z.matches_kind(kind)
                             && (q.is_empty()
                                 || z.name.to_lowercase().contains(&q)

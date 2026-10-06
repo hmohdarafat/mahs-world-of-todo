@@ -53,7 +53,7 @@ impl Ui {
                 }
                 self.stats.set_text(&format!("💰 {} gold   ✨ Talents: {}   🎖 Honor: {}", h.gold, h.talents, h.honor));
 
-                let zref = self.zones.iter().find(|z| z.name == h.zone);
+                let zref = h.zone_ref();
                 let zinfo = zref.map_or(String::new(), |z| {
                     let r = z.relation(&h.faction);
                     format!(" (Lv {} · {} · +{}% XP · {}% chance of higher-level creatures)",

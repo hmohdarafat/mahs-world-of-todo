@@ -89,14 +89,27 @@ pub(crate) fn zone_bands() -> Vec<(u32, u32)> {
     v
 }
 
-/// 3 zones (Alliance, Horde, Contested) for every level band.
-pub(crate) fn generate_zones() -> Vec<Zone> {
-    let mut used: HashSet<String> = HashSet::new();
+fn zone_name() -> String {
+    match rnd(5) {
+        0 | 1 => format!("{}{}", pick(&ZONE_A), pick(&ZONE_B)),
+        2 => format!("{} {}{}", ps(&ZONE_ADJ), pick(&ZONE_A), pick(&ZONE_B)),
+        3 => format!("{}{} {}", pick(&ZONE_A), pick(&ZONE_B), ps(&ZONE_REGION)),
+        _ => format!("{} {}", npc_name(), ps(&ZONE_REGION)),
+    }
+}
+
+pub(crate) fn all_zone_names(heroes: &[Hero]) -> HashSet<String> {
+    heroes.iter().flat_map(|h| h.zones.iter().map(|z| z.name.clone())).collect()
+}
+
+/// 3 zones per level band, names unique within the hero and against `avoid` (other heroes' zones).
+pub(crate) fn generate_zones(avoid: &HashSet<String>) -> Vec<Zone> {
+    let mut used = avoid.clone();
     let mut out = vec![];
     for (lo, hi) in zone_bands() {
         for terr in ZONE_TERR {
             let name = loop {
-                let n = format!("{}{}", pick(&ZONE_A), pick(&ZONE_B));
+                let n = zone_name();
                 if used.insert(n.clone()) { break n; }
             };
             let (types, creatures) = roll_creatures();

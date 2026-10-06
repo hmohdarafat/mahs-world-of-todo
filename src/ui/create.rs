@@ -1,6 +1,6 @@
 use std::rc::Rc;
 use gtk::prelude::*;
-use crate::{config::*, data::{classes::*, creatures::matchup_markup}, model::*, persistence::*, utils::*, world::starting_zone};
+use crate::{config::*, data::{classes::*, creatures::matchup_markup}, model::*, persistence::*, utils::*, world::{all_zone_names, generate_zones, starting_zone}};
 use super::{common::labeled, Ui};
 
 pub(crate) fn create_screen(ui: &Rc<Ui>) -> gtk::Box {
@@ -89,8 +89,9 @@ pub(crate) fn create_screen(ui: &Rc<Ui>) -> gtk::Box {
             let race_name = rl[(race.selected() as usize).min(rl.len() - 1)];
             let ci = (class.selected() as usize).min(CLASSES.len() - 1);
             let si = (spec.selected() as usize).min(CLASSES[ci].specs.len() - 1);
-            let zone = starting_zone(&u.zones, fac);
-            let hero = Hero::new(n.clone(), guild.text().trim().to_string(), &u.realms[ri], fac, race_name, ci, si, zone);
+            let zones = generate_zones(&all_zone_names(&u.save.borrow().heroes));
+            let zone = starting_zone(&zones, fac);
+            let hero = Hero::new(n.clone(), guild.text().trim().to_string(), &u.realms[ri], fac, race_name, ci, si, zone, zones);
             let idx = {
                 let mut s = u.save.borrow_mut();
                 s.heroes.push(hero);

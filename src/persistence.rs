@@ -1,8 +1,10 @@
 use gtk::glib;
 use std::path::PathBuf;
+use std::collections::HashSet;
+
 use crate::{
     config::{MAX_LEVEL, ZONE_TERR}, data::{classes::*, items::*}, items::make_item, model::*, utils::*,
-    world::{fallback_zone, generate_zones, zone_bands},
+    world::{fallback_zone, generate_zones, zone_bands, all_zone_names},
 };
 
 pub(crate) fn save_path() -> PathBuf {
@@ -14,8 +16,17 @@ pub(crate) fn save_path() -> PathBuf {
 /// Upgrade old saves: old gear system, kill-quest steps, resource bars, removed zones.
 pub(crate) fn migrate(s: &mut Save) {
     let map: [usize; 6] = [0, 1, 2, 6, S_MAIN, 12];
-    let zones = &s.zones;
+    let expected = zone_bands().len() * ZONE_TERR.len();
+     let legacy = std::mem::take(&mut s.zones);
+    let mut taken = all_zone_names(&s.heroes);
+    taken.extend(legacy.iter().map(|z| z.name.clone()));
     for h in &mut s.heroes {
+        if h.zones.len() != expected {
+            // old saves keep the shared zones they already progressed in; everyone else gets their own
+            h.zones = if h.zones.is_empty() && legacy.len() == expected { legacy.clone() }
+                      else { generate_zones(&taken) };
+            taken.extend(h.zones.iter().map(|z| z.name.clone()));
+        }
         for q in &mut h.quests {
             if q.quest_level == 0 {
                 q.quest_level = h.level.clamp(1, MAX_LEVEL);
@@ -44,8 +55,9 @@ pub(crate) fn migrate(s: &mut Save) {
                 msg: "🔧 Old gear converted to the new equipment system.".into(),
             });
         }
-        if !zones.iter().any(|z| z.name == h.zone) {
-            h.zone = fallback_zone(zones, &h.faction, h.level);
+        if !h.zones.iter().any(|z| z.name == h.zone) {
+            let z = fallback_zone(&h.zones, &h.faction, h.level);
+            h.zone = z;
             h.zone_inst.clear();
         }
         // 0 HP is now a valid state; only old saves (no `v2`) treat 0 as "unset".
@@ -60,12 +72,11 @@ pub(crate) fn migrate(s: &mut Save) {
 pub(crate) fn load() -> Save {
     let mut s: Save = std::fs::read_to_string(save_path()).ok()
         .and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-    let regen = s.zones.len() != zone_bands().len() * ZONE_TERR.len();
-    if regen { s.zones = generate_zones(); }
     migrate(&mut s);
-    if regen { persist(&s); }
+    persist(&s);
     s
 }
+
 pub(crate) fn persist(s: &Save) {
     if let Ok(j) = serde_json::to_string_pretty(s) { let _ = std::fs::write(save_path(), j); }
 }

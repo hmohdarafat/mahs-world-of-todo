@@ -37,6 +37,14 @@ pub(crate) const ZONE_B: [&str; 14] = [
     "ridge", "basin",
 ];
 
+pub(crate) const ZONE_ADJ: [&str; 12] = [
+    "Shattered", "Forsaken", "Silent", "Verdant", "Blighted", "Crimson", "Frozen", "Sunken",
+    "Windswept", "Haunted", "Burning", "Ancient",
+];
+pub(crate) const ZONE_REGION: [&str; 8] = [
+    "Expanse", "Highlands", "Wilds", "Hollows", "Frontier", "Depths", "Marches", "Steppes",
+];
+
 pub(crate) const REALM_A: [&str; 12] = [
     "Storm", "Dark", "Silver", "Iron", "Blood", "Frost", "Ember", "Shadow", "Thunder", "Golden", "Moon", "Star",
 ];

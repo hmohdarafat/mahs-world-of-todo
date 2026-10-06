@@ -117,12 +117,13 @@ pub(crate) struct Hero {
     #[serde(default)] pub(crate) bag: Vec<Item>, #[serde(default)] pub(crate) hp: u32, #[serde(default)] pub(crate) mana: u32,
     #[serde(default)] pub(crate) sta: u32, #[serde(default)] pub(crate) pots: [u32; 3],
     #[serde(default)] pub(crate) v2: bool,
+    #[serde(default)] pub(crate) zones: Vec<Zone>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
 pub(crate) struct Save {
     pub(crate) heroes: Vec<Hero>,
-    #[serde(default)] pub(crate) zones: Vec<Zone>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")] pub(crate) zones: Vec<Zone>,
 }
 
 #[derive(Clone, Copy)]

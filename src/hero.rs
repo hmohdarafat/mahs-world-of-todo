@@ -1,12 +1,12 @@
 use crate::{config::*, data::{abilities::*, classes::CLASSES, creatures::*, items::*}, items::*, model::*, quests::Encounter, utils::*};
 impl Hero {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(name: String, guild: String, realm: &Realm, faction: &str, race: &str, class: usize, spec: usize, zone: String) -> Self {
-        let mut h = Hero {
+pub(crate) fn new(name: String, guild: String, realm: &Realm, faction: &str, race: &str, class: usize, spec: usize, zone: String, zones: Vec<Zone>) -> Self {
+            let mut h = Hero {
             name, guild, realm: realm.name.clone(), realm_tier: realm.tier,
             faction: faction.into(), race: race.into(), class, spec,
             level: 1, xp: 0, gold: 0, talents: 0, done: 0, honor: 0, wins: 0, losses: 0,
-            zone, zone_inst: String::new(),
+            zone, zone_inst: String::new(), zones,
             gear: vec![None; SLOTS.len()], prof: vec![0; CATS.len() - 1],
             achievements: vec![], quests: vec![], log: vec![], bag: vec![],
             hp: 0, mana: 0, sta: 0, pots: [0; 3],
@@ -17,6 +17,9 @@ impl Hero {
     }
 
     pub(crate) fn need(&self) -> u32 { 100 + self.level * 50 }
+
+    pub(crate) fn zone_named(&self, name: &str) -> Option<&Zone> { self.zones.iter().find(|z| z.name == name) }
+    pub(crate) fn zone_ref(&self) -> Option<&Zone> { self.zone_named(&self.zone) }
 
     pub(crate) fn two_now(&self) -> bool {
         self.gear.get(S_MAIN).and_then(|o| o.as_ref()).map_or(false, |i| i.is_two())
