@@ -56,7 +56,7 @@ pub(crate) struct Ui {
     pub(crate) pot_btn: [gtk::Button; 3],
     pub(crate) giver: gtk::Label, entry: gtk::Entry, goal: gtk::SpinButton,
     pub(crate) qkind: gtk::DropDown, quest_level: gtk::DropDown, tier: gtk::DropDown, cat: gtk::DropDown, chain: gtk::CheckButton,
-    pub(crate) qlist: gtk::Box, status: gtk::Label,
+    pub(crate) qlist_kill: gtk::Box, qlist_gather: gtk::Box, status: gtk::Label,
     pub(crate) zsearch: gtk::Entry, zkind: gtk::DropDown, zcount: gtk::Label, zlist: gtk::Box,
     pub(crate) pvp_head: gtk::Label, pvp_faction: gtk::DropDown, pvp_result: gtk::Label, pvp_list: gtk::Box,
     pub(crate) log_filter: gtk::DropDown, log_view: gtk::TextView,
@@ -119,10 +119,10 @@ impl Ui {
         entry.set_placeholder_text(Some("e.g. Write report / Clean the kitchen"));
         let goal = gtk::SpinButton::with_range(1.0, MAX_QGOAL as f64, 1.0);
         goal.set_tooltip_text(Some("How many times the objective must be completed (1-15). Kill quests create one task per kill; gather quests count successful gathers."));
-        let qkind = gtk::DropDown::from_strings(&["Kill", "Gather"]);
+        let qkind = gtk::DropDown::from_strings(&["Kill (Tasks)", "Gather (Habits)"]);
         let quest_level = gtk::DropDown::from_strings(&["Lv 1", "Lv 2", "Lv 3", "Lv 4", "Lv 5", "Lv 6"]);
-        quest_level.set_tooltip_text(Some("Quest level is limited to 5 levels below/above your current character level."));
-        qkind.set_tooltip_text(Some("Choose the quest objective type. Kill targets and gather ambushes use creatures from the zone you are in."));
+        quest_level.set_tooltip_text(Some("Quest level is limited to 5 levels below/above your current character level. Every level above you multiplies HP, mana and stamina loss by ×1.7."));
+        qkind.set_tooltip_text(Some("Kill quests are for tasks, gather quests are for habits. Kill targets and gather ambushes use creatures from the zone you are in."));
         let tier = gtk::DropDown::from_strings(&["Normal"]);
         tier.set_tooltip_text(Some("Difficulty = how big the task is. It also sets the creature rank: Normal/Swarmer, Elite, Rare, Rare-Elite, Boss."));
         let cat = gtk::DropDown::from_strings(&["Adventure"]);
@@ -132,31 +132,61 @@ impl Ui {
         let add_btn = gtk::Button::with_label("Accept quest");
         add_btn.add_css_class("suggested-action");
         add_btn.set_valign(gtk::Align::End);
-        let add_row = gtk::Box::new(ho, 8);
-        add_row.append(&labeled("Quest", &entry));
-        add_row.append(&labeled("Type", &qkind));
-        add_row.append(&labeled("Quest Lv", &quest_level));
-        add_row.append(&labeled("Goal", &goal));
-        add_row.append(&labeled("Difficulty", &tier));
-        add_row.append(&labeled("Profession", &cat));
-        add_row.append(&labeled("Chain", &chain));
-        add_row.append(&add_btn);
+
+        let quest_field = labeled("Quest", &entry);
+        quest_field.set_hexpand(true);
+        let new_row = gtk::Box::new(ho, 12);
+        new_row.append(&quest_field);
+        new_row.append(&add_btn);
+        let opt_row = gtk::Box::new(ho, 16);
+        opt_row.append(&labeled("Type", &qkind));
+        opt_row.append(&labeled("Quest Lv", &quest_level));
+        opt_row.append(&labeled("Goal", &goal));
+        opt_row.append(&labeled("Difficulty", &tier));
+        opt_row.append(&labeled("Profession", &cat));
+        opt_row.append(&labeled("Chain", &chain));
         let hint = gtk::Label::new(Some(
-            "Choose KILL (kill X creatures from your current zone — every kill is a line you fill in and mark done or abandon) \
-             or GATHER (press ⚔ +1: each attempt may or may not find the item, and zone creatures ambush you while you search). \
-             The Goal field controls the required count. \
-             Every step has a chance to drop a health, mana or stamina potion. Quest Lv stays within ±5 of your character level; \
-             higher-level quests consume more HP, mana and stamina when performed.",
+            "KILL (Tasks): kill X creatures from your current zone — every kill is a line you fill in and mark done or abandon. \
+             GATHER (Habits): press ⚔ +1 — each attempt may or may not find the item, and zone creatures ambush you while you search. \
+             Every step has a chance to drop a potion. Quest Lv stays within ±5 of your level, but every level above you multiplies \
+             HP, mana and stamina loss by ×1.7. Drag the ☰ handle on a quest to rearrange it.",
         ));
         hint.set_xalign(0.0); hint.set_wrap(true); hint.add_css_class("dim-label");
-        let qlist = gtk::Box::new(ve, 6);
-        let qscroll = gtk::ScrolledWindow::builder().vexpand(true).child(&qlist).build();
+        let add_inner = gtk::Box::new(ve, 12);
+        pad(&add_inner, 12);
+        add_inner.append(&new_row); add_inner.append(&opt_row); add_inner.append(&hint);
+        let add_frame = gtk::Frame::new(Some("📜 Accept a new quest"));
+        add_frame.set_child(Some(&add_inner));
+
+        let qlist_kill = gtk::Box::new(ve, 10); pad(&qlist_kill, 4);
+        let qlist_gather = gtk::Box::new(ve, 10); pad(&qlist_gather, 4);
+        let mk_col = |title: &str, list: &gtk::Box| -> gtk::Box {
+            let head = gtk::Label::new(None);
+            head.set_markup(title);
+            head.set_xalign(0.0);
+            let scroll = gtk::ScrolledWindow::builder()
+                .vexpand(true).hexpand(true)
+                .hscrollbar_policy(gtk::PolicyType::Never)
+                .child(list).build();
+            let col = gtk::Box::new(ve, 8);
+            col.set_hexpand(true);
+            col.append(&head); col.append(&scroll);
+            col
+        };
+        let columns = gtk::Box::new(ho, 16);
+        columns.set_homogeneous(true);
+        columns.set_vexpand(true);
+        columns.append(&mk_col("<span size='large' weight='bold'>⚔ Kill quests (Tasks)</span>", &qlist_kill));
+        columns.append(&mk_col("<span size='large' weight='bold'>🌿 Gather quests (Habits)</span>", &qlist_gather));
+
         let status = gtk::Label::new(None); status.set_xalign(0.0); status.set_wrap(true);
-        let quests_page = gtk::Box::new(ve, 8);
+        let quests_page = gtk::Box::new(ve, 12);
         pad(&quests_page, 10);
-        for w in [giver.upcast_ref::<gtk::Widget>(), add_row.upcast_ref(), hint.upcast_ref(), qscroll.upcast_ref(), status.upcast_ref()] {
-            quests_page.append(w);
-        }
+        quests_page.append(&giver);
+        quests_page.append(&add_frame);
+        quests_page.append(&gtk::Separator::new(ho));
+        quests_page.append(&columns);
+        quests_page.append(&status);
 
         // ----- zones tab
         let zsearch = gtk::Entry::new(); zsearch.set_hexpand(true);
@@ -214,7 +244,7 @@ impl Ui {
         let store_gold = gtk::Label::new(None); store_gold.set_xalign(0.0);
         let store_hint = gtk::Label::new(Some(
             "Stock is generated around your level and usable by your class. Bought gear goes to your bag — equip it from the Equipment tab. \
-             ▲ marks an upgrade over what you wear.",
+             ▲ marks an upgrade over what you wear. \"If equipped\" shows your Attack/Defense change (green = more, red = less).",
         ));
         store_hint.set_xalign(0.0); store_hint.set_wrap(true); store_hint.add_css_class("dim-label");
         let pot_title = gtk::Label::new(None); pot_title.set_markup("<b>Potions</b>"); pot_title.set_xalign(0.0);
@@ -236,7 +266,8 @@ impl Ui {
         let honor_hint = gtk::Label::new(Some(
             "Earn honor by winning Realm PvP duels (beating the opposite faction ★ gives +1 honor and +50% XP). \
              Stock is Rare gear below level 40 and Epic gear from level 40, usable by your class. \
-             Bought gear goes to your bag. ▲ marks an upgrade over what you wear.",
+             Bought gear goes to your bag. ▲ marks an upgrade over what you wear. \
+             \"If equipped\" shows your Attack/Defense change (green = more, red = less).",
         ));
         honor_hint.set_xalign(0.0); honor_hint.set_wrap(true); honor_hint.add_css_class("dim-label");
         let honor_list = gtk::Box::new(ve, 4);
@@ -306,7 +337,7 @@ impl Ui {
         stack.add_named(&select, Some("select"));
         stack.add_named(&game, Some("game"));
         let win = gtk::ApplicationWindow::builder().application(app)
-            .title(APP_TITLE).default_width(1000).default_height(900).build();
+            .title(APP_TITLE).default_width(1200).default_height(900).build();
         win.set_child(Some(&stack));
 
         let save = load();
@@ -318,7 +349,7 @@ impl Ui {
             honor_stock: RefCell::new(vec![]), honor_key: Cell::new((usize::MAX, 0)),
             dirty: Cell::new(u16::MAX), save_pending: Cell::new(false),
             stack, nb, sel_list, title, xp_bar, stats, hp_bar, mana_bar, sta_bar, pot_btn,
-            giver, entry, goal, qkind, quest_level, tier, cat, chain, qlist, status,
+            giver, entry, goal, qkind, quest_level, tier, cat, chain, qlist_kill, qlist_gather, status,
             zsearch, zkind, zcount, zlist, pvp_head, pvp_faction, pvp_result, pvp_list, log_filter, log_view, sheet, ab_list,
             eq_sum, eq_paperdoll, eq_list, bag_head, bag_list, store_gold, store_pots, store_list,
             honor_lbl, honor_list, smith_lbl, smith_all, smith_list,

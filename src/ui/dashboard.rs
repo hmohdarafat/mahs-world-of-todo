@@ -65,6 +65,7 @@ impl Ui {
         match p {
             0 => self.refresh_quests(),
             1 => self.refresh_zones(),
+            2 => self.refresh_pvp(),
             3 => self.refresh_equipment(),
             4 => self.refresh_store(),
             5 => self.refresh_honor_store(),
@@ -134,6 +135,7 @@ impl Ui {
         let qlv: Vec<String> = (quest_min..=quest_max).map(|lv| format!("Lv {lv}")).collect();
         set_options(&self.quest_level, &qlv);
         let keep_level = previous_level.clamp(quest_min, quest_max);
+        self.quest_level.set_selected(keep_level - quest_min);
 
         let tl: Vec<String> = Tier::ALL.iter().map(|t| {
             if t.unlock() <= h.level { format!("{} · x{} rewards", t.name(), t.mult()) }
@@ -146,12 +148,25 @@ impl Ui {
         }).collect();
         set_options(&self.cat, &cl);
 
-        clear(&self.qlist);
-        if h.quests.is_empty() { self.qlist.append(&gtk::Label::new(Some("No active quests."))); }
+        clear(&self.qlist_kill);
+        clear(&self.qlist_gather);
+        let (mut kills, mut gathers) = (0, 0);
         for (i, q) in h.quests.iter().enumerate() {
-            let fr = gtk::Frame::new(None);
-            fr.set_child(Some(&self.quest_row(i, q)));
-            self.qlist.append(&fr);
+            let card = self.quest_card(i, q, h);
+            match q.qk {
+                QKind::Kill => { kills += 1; self.qlist_kill.append(&card); }
+                QKind::Gather => { gathers += 1; self.qlist_gather.append(&card); }
+            }
+        }
+        if kills == 0 {
+            let l = gtk::Label::new(Some("No active kill quests (tasks)."));
+            l.add_css_class("dim-label");
+            self.qlist_kill.append(&l);
+        }
+        if gathers == 0 {
+            let l = gtk::Label::new(Some("No active gather quests (habits)."));
+            l.add_css_class("dim-label");
+            self.qlist_gather.append(&l);
         }
         let tail: Vec<&str> = h.log.iter().rev().take(3).map(|e| e.msg.as_str()).collect();
         self.status.set_text(&tail.into_iter().rev().collect::<Vec<_>>().join("\n"));

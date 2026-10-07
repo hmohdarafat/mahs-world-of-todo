@@ -1,22 +1,95 @@
 use std::rc::Rc;
-use gtk::{glib, prelude::*};
-use crate::{config::*, data::classes::*, model::*, quests::*, utils::*};
+use gtk::{gdk, glib, prelude::*};
+use crate::{config::*, data::{classes::*, creatures::*}, model::*, quests::*, utils::*};
 use super::{pad, sel, Ui};
 
+fn matchup_effect(m: Matchup) -> &'static str {
+    match m {
+        Matchup::Easy => "-20% HP/mana/stamina lost",
+        Matchup::Average => "normal HP/mana/stamina lost",
+        Matchup::Hard => "+25% HP/mana/stamina lost",
+    }
+}
+
 impl Ui {
-    pub(crate) fn quest_row(self: &Rc<Self>, i: usize, q: &Quest) -> gtk::Box {
-        let outer = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        pad(&outer, 8);
+    /// One quest card: drag handle (☰) to rearrange, drop anywhere on the card to place the dragged quest here.
+    pub(crate) fn quest_card(self: &Rc<Self>, i: usize, q: &Quest, h: &Hero) -> gtk::Frame {
+        let frame = gtk::Frame::new(None);
+        let handle = gtk::Label::new(Some("☰"));
+        handle.set_tooltip_text(Some("Drag to rearrange"));
+        handle.set_valign(gtk::Align::Center);
+        handle.set_cursor_from_name(Some("grab"));
+        handle.add_css_class("dim-label");
+        frame.set_child(Some(&self.quest_row(i, q, h, &handle)));
+
+        let src = gtk::DragSource::new();
+        src.set_actions(gdk::DragAction::MOVE);
+        let weak = frame.downgrade();
+        src.connect_prepare(move |s, _, _| {
+            if let Some(f) = weak.upgrade() {
+                let p = gtk::WidgetPaintable::new(Some(&f));
+                s.set_icon(Some(&p), 0, 0);
+            }
+            Some(gdk::ContentProvider::for_value(&(i as u32).to_value()))
+        });
+        handle.add_controller(src);
+
+        let drop = gtk::DropTarget::new(glib::Type::U32, gdk::DragAction::MOVE);
+        let u = self.clone();
+        drop.connect_drop(move |_, v, _, _| {
+            let Ok(from) = v.get::<u32>() else { return false };
+            let from = from as usize;
+            if from == i { return false; }
+            let u = u.clone();
+            // rebuild the list after the drop has fully finished
+            glib::idle_add_local_once(move || u.move_quest(from, i));
+            true
+        });
+        frame.add_controller(drop);
+        frame
+    }
+
+    /// Move quest `from` to position `to` (only within the same quest type).
+    pub(crate) fn move_quest(self: &Rc<Self>, from: usize, to: usize) {
+        let Some(a) = self.active.get() else { return };
+        {
+            let mut s = self.save.borrow_mut();
+            let Some(h) = s.heroes.get_mut(a) else { return };
+            if from == to || from >= h.quests.len() || to >= h.quests.len() { return; }
+            if h.quests[from].qk != h.quests[to].qk { return; }
+            let q = h.quests.remove(from);
+            h.quests.insert(to, q);
+        }
+        self.schedule_save();
+        self.refresh();
+    }
+
+    fn quest_row(self: &Rc<Self>, i: usize, q: &Quest, h: &Hero, handle: &gtk::Label) -> gtk::Box {
+        let outer = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        pad(&outer, 12);
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        let info = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        let info = gtk::Box::new(gtk::Orientation::Vertical, 6);
         info.set_hexpand(true);
+
         let t = gtk::Label::new(None);
-        t.set_xalign(0.0);
-        t.set_markup(&format!("<b>{}</b>", glib::markup_escape_text(q.display().as_str())));
+        t.set_xalign(0.0); t.set_wrap(true);
+        let mut title = format!("<b>{}</b>", glib::markup_escape_text(q.display().as_str()));
+        if q.qk == QKind::Kill && let Some(ct) = q.ctype {
+            let ct = ct.min(CTYPES.len() - 1);
+            let mu = matchup(CLASSES[h.class].name, ct);
+            title += &format!(
+                " <span foreground='{}'>({} · {} · {})</span>",
+                mu.color(), CTYPES[ct], mu.label(), matchup_effect(mu));
+        }
+        t.set_markup(&title);
+
+        let diff = q.quest_level as i32 - h.level as i32;
         let kind_txt = match q.qk { QKind::Kill => "⚔ Kill quest", QKind::Gather => "🌿 Gather quest" };
         let sub = gtk::Label::new(Some(&format!(
-            "{} · Quest Lv {} · {} · {} · 📍 {} · from {}", kind_txt, q.quest_level, q.tier.name(), CATS[q.cat], q.zone, q.giver)));
-        sub.set_xalign(0.0); sub.add_css_class("dim-label");
+            "{} · Quest Lv {} ({:+}) · {} · {} · 📍 {} · from {}",
+            kind_txt, q.quest_level, diff, q.tier.name(), CATS[q.cat], q.zone, q.giver)));
+        sub.set_xalign(0.0); sub.set_wrap(true); sub.add_css_class("dim-label");
+
         let bar = gtk::ProgressBar::new();
         bar.set_show_text(true);
         bar.set_fraction((q.progress as f64 / q.goal.max(1) as f64).min(1.0));
@@ -25,7 +98,17 @@ impl Ui {
             QKind::Gather => format!("{}/{} gathered · {} attempts", q.progress, q.goal, q.tries),
         };
         bar.set_text(Some(&btxt));
-        info.append(&t); info.append(&sub); info.append(&bar);
+
+        info.append(&t); info.append(&sub);
+        if diff > 0 {
+            let w = gtk::Label::new(None);
+            w.set_xalign(0.0); w.set_wrap(true);
+            w.set_markup(&format!(
+                "<span foreground='#e0453a'>⚠ {diff} level(s) above you — every action costs ×{:.1} HP/mana/stamina</span>",
+                Hero::level_pressure(diff) as f64 / 100.0));
+            info.append(&w);
+        }
+        info.append(&bar);
 
         let done = q.progress >= q.goal;
         let act = gtk::Button::with_label(if done { "Turn in" } else { "⚔ +1" });
@@ -35,17 +118,22 @@ impl Ui {
             act.set_sensitive(false);
             act.set_tooltip_text(Some("Finish every kill below first."));
         }
-        act.set_valign(gtk::Align::Center);
         { let u = self.clone(); act.connect_clicked(move |_| u.act(i)); }
         let del = gtk::Button::with_label("Abandon");
-        del.set_valign(gtk::Align::Center);
         { let u = self.clone(); del.connect_clicked(move |_| u.abandon(i)); }
-        row.append(&info); row.append(&act); row.append(&del);
+        let btns = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        btns.set_valign(gtk::Align::Center);
+        btns.append(&act); btns.append(&del);
+
+        row.append(handle); row.append(&info); row.append(&btns);
         outer.append(&row);
+
         if q.qk == QKind::Kill {
+            let steps = gtk::Box::new(gtk::Orientation::Vertical, 6);
             for (si, s) in q.steps.iter().enumerate() {
-                outer.append(&self.step_row(i, si, s));
+                steps.append(&self.step_row(i, si, s));
             }
+            outer.append(&steps);
         }
         outer
     }
@@ -63,9 +151,11 @@ impl Ui {
         if s.done {
             row.append(&gtk::Label::new(Some("✔ done")));
         } else {
-            let ok = gtk::Button::with_label("✔ Complete");
+            let ok = gtk::Button::with_label("✔");
+            ok.set_tooltip_text(Some("Complete this kill"));
             { let u = self.clone(); ok.connect_clicked(move |_| u.step_done(qi, si)); }
-            let no = gtk::Button::with_label("✖ Abandon");
+            let no = gtk::Button::with_label("✖");
+            no.set_tooltip_text(Some("Abandon this kill"));
             { let u = self.clone(); no.connect_clicked(move |_| u.step_abandon(qi, si)); }
             row.append(&ok); row.append(&no);
         }

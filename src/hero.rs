@@ -168,6 +168,18 @@ impl Hero {
         Self::stat_delta_text(self.stats(), self.stats_with(drop, Some(it)))
     }
 
+    /// (attack change, defense change) if `it` were equipped now. None = can't be equipped.
+    pub(crate) fn equip_delta(&self, it: &Item) -> Option<(i64, i64)> {
+        let cands = candidates(it, self.class, self.two_now());
+        if cands.is_empty() { return None; }
+        let target = self.best_slot(&cands);
+        let both = [S_MAIN, S_OFF];
+        let one = [target];
+        let drop: &[usize] = if it.is_two() { &both } else { &one };
+        let (b, a) = (self.stats(), self.stats_with(drop, Some(it)));
+        Some((a.atk as i64 - b.atk as i64, a.def as i64 - b.def as i64))
+    }
+
     pub(crate) fn stash(&mut self, it: Item, msgs: &mut Vec<Msg>) {
         if self.bag.len() < BAG_MAX || it.quality == Q_HEIRLOOM {
             self.bag.push(it);
@@ -187,12 +199,25 @@ impl Hero {
         }
     }
 
+    /// Resource-loss multiplier (in %) for a quest `diff` levels above (+) or below (-) the hero.
+    /// Above the hero it grows ×1.7 per level, so even +1 hurts and +4 is brutal.
+    pub(crate) fn level_pressure(diff: i32) -> u32 {
+        if diff > 0 {
+            let mut p = 100u32;
+            for _ in 0..diff.min(6) { p = p * 17 / 10; }
+            p
+        } else {
+            (100 + diff * 12).clamp(40, 100) as u32
+        }
+    }
+
     /// Apply the resource cost of performing one action on a quest.
     pub(crate) fn apply_quest_cost(&mut self, q: &Quest, enc: &Encounter, msgs: &mut Vec<Msg>) {
         let (max_hp, max_mana, max_sta) = self.maxes();
-        let eff = (q.quest_level + enc.level).div_ceil(2);
-        let diff = eff as i32 - self.level as i32;
-        let mut pressure = (100 + diff * 15).clamp(40, 175) as u32;
+        let lvl = self.level as i32;
+        // quest level difference, plus any extra danger from a higher-level creature
+        let diff = (q.quest_level as i32 - lvl) + (enc.level as i32 - lvl).max(0);
+        let mut pressure = Self::level_pressure(diff);
         let mu = matchup(CLASSES[self.class].name, enc.ctype);
         pressure = match mu {
             Matchup::Easy => pressure * 80 / 100,
@@ -209,8 +234,9 @@ impl Hero {
         self.sta = self.sta.saturating_sub(sta_loss);
 
         msgs.push(m("Quest", format!(
-            "⚠ {} (Lv {}, {}) — {} matchup · -{} HP, -{} mana, -{} stamina",
-            enc.name, enc.level, CTYPES[enc.ctype.min(CTYPES.len() - 1)], mu.label(), hp_loss, mana_loss, sta_loss
+            "⚠ {} (Lv {}, {}) — {} matchup · level difference {:+} → ×{:.1} · -{} HP, -{} mana, -{} stamina",
+            enc.name, enc.level, CTYPES[enc.ctype.min(CTYPES.len() - 1)], mu.label(),
+            diff, pressure as f64 / 100.0, hp_loss, mana_loss, sta_loss
         )));
         if self.hp == 0 { self.wear_gear(10, msgs); }
     }

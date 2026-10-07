@@ -5,6 +5,22 @@ use super::{clear, Ui};
 
 fn rarity_class(q: usize) -> String { format!("gear-quality-{}", q.min(6)) }
 
+/// Green for gain, red for loss, grey for no change.
+fn delta_span(label: &str, v: i64) -> String {
+    let (col, txt) = if v > 0 { ("#3fb950", format!("+{v}")) }
+        else if v < 0 { ("#e0453a", format!("{v}")) }
+        else { ("#8b949e", "±0".to_string()) };
+    format!("<span foreground='{col}'>{label} {txt}</span>")
+}
+
+/// Markup showing the attack/defense change if this item were equipped now.
+fn equip_delta_markup(h: &Hero, it: &Item) -> String {
+    match h.equip_delta(it) {
+        Some((atk, def)) => format!("{} · {}", delta_span("ATK", atk), delta_span("DEF", def)),
+        None => "<span foreground='#8b949e'>can't be equipped</span>".to_string(),
+    }
+}
+
 fn slot_card(slot_index: usize, item: Option<&Item>) -> gtk::Frame {
     let slot = SLOTS[slot_index];
     let frame = gtk::Frame::new(None);
@@ -221,9 +237,10 @@ impl Ui {
             let si = it.stats_inline();
             let up = if h.is_upgrade(it) { "<span foreground='#3fb950'>▲</span> " } else { "" };
             lbl.set_markup(&format!(
-                "{up}{}\n<small>ilvl {} · {} · {}</small>",
+                "{up}{}\n<small>ilvl {} · {} · {}</small>\n<small>If equipped: {}</small>",
                 qspan(it.quality, it.name.as_str()), it.ilvl,
-                glib::markup_escape_text(tl.as_str()), glib::markup_escape_text(si.as_str())));
+                glib::markup_escape_text(tl.as_str()), glib::markup_escape_text(si.as_str()),
+                equip_delta_markup(h, it)));
             lbl.set_tooltip_text(Some(&it.tip()));
             let price = it.buy_price();
             let b = gtk::Button::with_label(&format!("Buy {price}g"));
@@ -292,10 +309,11 @@ impl Ui {
             lbl.set_xalign(0.0); lbl.set_hexpand(true);
             let up = if h.is_upgrade(it) { "<span foreground='#3fb950'>▲</span> " } else { "" };
             lbl.set_markup(&format!(
-                "{up}{}\n<small>ilvl {} · {} · {}</small>",
+                "{up}{}\n<small>ilvl {} · {} · {}</small>\n<small>If equipped: {}</small>",
                 qspan(it.quality, it.name.as_str()), it.ilvl,
                 glib::markup_escape_text(it.type_label().as_str()),
-                glib::markup_escape_text(it.stats_inline().as_str())));
+                glib::markup_escape_text(it.stats_inline().as_str()),
+                equip_delta_markup(h, it)));
             lbl.set_tooltip_text(Some(&it.tip()));
             let price = it.honor_price();
             let b = gtk::Button::with_label(&format!("Buy {price} 🎖"));

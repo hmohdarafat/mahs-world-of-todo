@@ -34,6 +34,12 @@ impl Ui {
             .collect();
         visible.sort_by(|a, b| (a.1.level, a.1.name.as_str()).cmp(&(b.1.level, b.1.name.as_str())));
 
+        if visible.is_empty() {
+            let l = gtk::Label::new(Some("No players left nearby — press “🔄 New players”."));
+            l.add_css_class("dim-label");
+            self.pvp_list.append(&l);
+        }
+
         for (i, o) in visible.into_iter() {
             let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
             pad(&row, 6);
@@ -69,6 +75,11 @@ impl Ui {
         self.with_hero(|h, msgs| {
             let me = h.fighter();
             let d = fight(&me, &opp);
+            // a defeated player leaves the list
+            if d.won {
+                let mut o = self.opps.borrow_mut();
+                if i < o.len() { o.remove(i); }
+            }
             let rounds = d.lines.len();
             msgs.push(m("PvP", format!(
                 "⚔ Duel: {} (Lv {}, {}) vs {} (Lv {}, {})",
