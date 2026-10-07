@@ -1,7 +1,10 @@
 [package]
-name = "mah-wow-todo"
+name = "mah_world_of_todo"
 version = "0.1.0"
 edition = "2024"
+description = "Mohd Arafat Hossain's World of Warcraft themed todo application"
+license = "UNLICENSED"
+publish = false
 
 [dependencies]
 gtk = { package = "gtk4", version = "0.9" }
@@ -13,3 +16,10 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 strip = true
+
+[package.metadata.deb]
+depends = "libgtk-4-1, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0"
+assets = [
+    ["target/release/mah_world_of_todo", "usr/bin/", "755"],
+    ["assets/**/*", "usr/share/mah_world_of_todo/assets/", "644"],
+]
