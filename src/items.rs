@@ -1,5 +1,5 @@
 use gtk::glib;
-use crate::{config::*, data::{classes::*, items::*}, model::*, utils::*};
+use crate::{config::*, data::{classes::*, items::*}, model::*, stats::stat_effect, utils::*};
 use crate::model::{Role::{Healer, Ranged, Tank}, Wt::{Axe, Bow, Crossbow, Dagger, Fist, Gun, Mace, Polearm, Staff, Sword, Wand, Warglaive}};
 
 pub(crate) fn qspan(q: usize, text: &str) -> String {
@@ -8,7 +8,6 @@ pub(crate) fn qspan(q: usize, text: &str) -> String {
 }
 
 impl Item {
-
     pub(crate) fn repair_cost(&self) -> u32 {
         let missing = 100u32.saturating_sub(self.durability);
         if missing == 0 { 0 } else { ((self.ilvl * 3 + 10) * missing / 100).max(1) }
@@ -72,24 +71,7 @@ impl Item {
 
     /// Explain exactly what each raw gear stat changes in the current class/spec.
     pub(crate) fn stat_impact_text(&self, class: usize, spec: usize) -> String {
-        let prim = primary(class, CLASSES[class].specs[spec].1);
-        self.stats.iter().map(|&(s, v)| {
-            let effect = match s {
-                0 => format!("HP +{} · Stamina +{}", v * 5, v / 2),
-                1..=3 => {
-                    let atk = if s == prim { v } else { v / 4 };
-                    let mut out = format!("Attack +{atk}");
-                    if s == 3 { out.push_str(&format!(" · Mana +{}", v * 2)); }
-                    out
-                }
-                4 => format!("Attack +{}", v / 2),
-                5 => format!("Crit +{}%", v / 6),
-                6 => format!("Defense +{}", v / 2),
-                7 => format!("HP +{} · Attack +{}", v * 2, v / 3),
-                _ => String::new(),
-            };
-            format!("+{v} {} → {}", STAT_NAMES[s.min(7)], effect)
-        }).collect::<Vec<_>>().join("\n")
+        self.stats.iter().map(|&(s, v)| stat_effect(class, spec, s, v)).collect::<Vec<_>>().join("\n")
     }
 
     pub(crate) fn tip(&self) -> String {
@@ -124,10 +106,7 @@ pub(crate) fn stat_value(s: usize, v: u32, prim: usize) -> u32 {
 pub(crate) fn item_power(it: &Item, class: usize, spec: usize) -> u32 {
     if it.kind == Kind::Cosmetic { return 0; }
     let prim = primary(class, CLASSES[class].specs[spec].1);
-    let w = if it.is_two() { 3 } else { 2 };
-    let mut p = it.ilvl * QMULT[it.quality.min(6)] / 100 * w / 2;
-    for &(s, v) in &it.stats { p += stat_value(s, v, prim); }
-    p
+    it.gear_power() + it.stats.iter().map(|&(s, v)| stat_value(s, v, prim)).sum::<u32>()
 }
 
 /// Which equipment slots could this item go into for the class?

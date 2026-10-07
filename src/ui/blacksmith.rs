@@ -1,11 +1,11 @@
 use std::rc::Rc;
 use gtk::{glib, prelude::*};
 use crate::{data::items::SLOTS, items::qspan, model::*, utils::*};
-use super::Ui;
+use super::{clear, Ui};
 
 impl Ui {
     pub(crate) fn refresh_blacksmith(self: &Rc<Self>) {
-        while let Some(c) = self.smith_list.first_child() { self.smith_list.remove(&c); }
+        clear(&self.smith_list);
         let Some(a) = self.active.get() else { return };
         let s = self.save.borrow();
         let Some(h) = s.heroes.get(a) else { return };
@@ -43,11 +43,7 @@ impl Ui {
     }
 
     pub(crate) fn repair(self: &Rc<Self>, bag: bool, i: usize) {
-        let Some(a) = self.active.get() else { return };
-        let mut msgs: Vec<Msg> = vec![];
-        {
-            let mut s = self.save.borrow_mut();
-            let Some(h) = s.heroes.get_mut(a) else { return };
+        self.with_hero(|h, msgs| {
             let gold = h.gold;
             let it = if bag { h.bag.get_mut(i) } else { h.gear.get_mut(i).and_then(|o| o.as_mut()) };
             let Some(it) = it else { return };
@@ -60,16 +56,11 @@ impl Ui {
                 h.gold -= cost;
                 msgs.push(m("Loot", format!("🔨 Repaired {name} for {cost} gold")));
             }
-        }
-        self.finish(msgs);
+        });
     }
 
     pub(crate) fn repair_all(self: &Rc<Self>) {
-        let Some(a) = self.active.get() else { return };
-        let mut msgs: Vec<Msg> = vec![];
-        {
-            let mut s = self.save.borrow_mut();
-            let Some(h) = s.heroes.get_mut(a) else { return };
+        self.with_hero(|h, msgs| {
             let total = h.repair_total();
             if total == 0 {
                 msgs.push(m("System", "Nothing needs repairing."));
@@ -80,7 +71,6 @@ impl Ui {
                 h.gold -= total;
                 msgs.push(m("Loot", format!("🔨 Repaired all equipment for {total} gold")));
             }
-        }
-        self.finish(msgs);
+        });
     }
 }

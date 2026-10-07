@@ -1,8 +1,15 @@
-use crate::{config::*, data::{abilities::*, classes::CLASSES, creatures::*, items::*}, items::*, model::*, quests::Encounter, utils::*};
+use crate::{
+    config::*,
+    data::{abilities::*, classes::CLASSES, creatures::*, items::*},
+    items::*, model::*, quests::Encounter,
+    stats::{derive_stats, GearAgg},
+    utils::*,
+};
+
 impl Hero {
     #[allow(clippy::too_many_arguments)]
-pub(crate) fn new(name: String, guild: String, realm: &Realm, faction: &str, race: &str, class: usize, spec: usize, zone: String, zones: Vec<Zone>) -> Self {
-            let mut h = Hero {
+    pub(crate) fn new(name: String, guild: String, realm: &Realm, faction: &str, race: &str, class: usize, spec: usize, zone: String, zones: Vec<Zone>) -> Self {
+        let mut h = Hero {
             name, guild, realm: realm.name.clone(), realm_tier: realm.tier,
             faction: faction.into(), race: race.into(), class, spec,
             level: 1, xp: 0, gold: 0, talents: 0, done: 0, honor: 0, wins: 0, losses: 0,
@@ -33,9 +40,20 @@ pub(crate) fn new(name: String, guild: String, realm: &Realm, faction: &str, rac
         }
     }
 
+    /// Derived stats with some slots removed and/or an extra item added. No cloning.
+    pub(crate) fn stats_with(&self, drop: &[usize], add: Option<&Item>) -> Stats {
+        let items = self.gear.iter().enumerate()
+            .filter(|(i, _)| !drop.contains(i))
+            .filter_map(|(_, o)| o.as_ref())
+            .chain(add);
+        derive_stats(self.class, self.spec, self.level, self.talents, &GearAgg::of(items))
+    }
+
+    pub(crate) fn stats(&self) -> Stats { self.stats_with(&[], None) }
+
     /// (max hp, max mana, max stamina)
     pub(crate) fn maxes(&self) -> (u32, u32, u32) {
-        let s = self.fighter().stats();
+        let s = self.stats();
         (s.hp, s.mana, s.sta)
     }
 
@@ -67,21 +85,30 @@ pub(crate) fn new(name: String, guild: String, realm: &Realm, faction: &str, rac
         if n > MAX_LOG { self.log.drain(..n - MAX_LOG); }
     }
 
+    fn power_at(&self, slot: usize) -> i64 {
+        self.gear[slot].as_ref().map_or(-1, |i| item_power(i, self.class, self.spec) as i64)
+    }
+
+    /// The candidate slot currently holding the weakest item (empty counts weakest).
+    fn best_slot(&self, cands: &[usize]) -> usize {
+        cands.iter().copied().min_by_key(|&s| self.power_at(s)).unwrap_or(S_MAIN)
+    }
+
     /// Equip into the best slot. Ok(displaced items) or Err(item) if not equipped.
     pub(crate) fn place(&mut self, it: Item, force: bool) -> Result<Vec<Item>, Item> {
         let cands = candidates(&it, self.class, self.two_now());
         if cands.is_empty() { return Err(it); }
-        let (class, spec) = (self.class, self.spec);
-        let pw = |o: &Option<Item>| o.as_ref().map_or(-1i64, |i| item_power(i, class, spec) as i64);
-        let target = cands.iter().copied().min_by_key(|&s| pw(&self.gear[s])).unwrap_or(S_MAIN);
+        let target = self.best_slot(&cands);
         let two = it.is_two();
-        let old_p = if two {
-            let (a, b) = (pw(&self.gear[S_MAIN]), pw(&self.gear[S_OFF]));
-            if a < 0 && b < 0 { -1 } else { a.max(0) + b.max(0) }
-        } else {
-            pw(&self.gear[target])
-        };
-        if !force && item_power(&it, class, spec) as i64 <= old_p { return Err(it); }
+        if !force {
+            let old_p = if two {
+                let (a, b) = (self.power_at(S_MAIN), self.power_at(S_OFF));
+                if a < 0 && b < 0 { -1 } else { a.max(0) + b.max(0) }
+            } else {
+                self.power_at(target)
+            };
+            if item_power(&it, self.class, self.spec) as i64 <= old_p { return Err(it); }
+        }
         let mut out = vec![];
         if let Some(o) = self.gear[target].take() { out.push(o); }
         if two {
@@ -98,20 +125,6 @@ pub(crate) fn new(name: String, guild: String, realm: &Realm, faction: &str, rac
         cands.iter().any(|&s| self.gear[s].as_ref().map_or(true, |o| item_power(o, self.class, self.spec) < p))
     }
 
-    fn stats_for_gear(&self, gear: Vec<Option<Item>>) -> Stats {
-        Fighter {
-            name: self.name.clone(),
-            faction: self.faction.clone(),
-            race: self.race.clone(),
-            class: self.class,
-            spec: self.spec,
-            level: self.level,
-            gear,
-            talents: self.talents,
-            cur: None,
-        }.stats()
-    }
-
     fn stat_delta_text(before: Stats, after: Stats) -> String {
         let delta = |a: u32, b: u32| -> i64 { b as i64 - a as i64 };
         let parts = [
@@ -123,59 +136,38 @@ pub(crate) fn new(name: String, guild: String, realm: &Realm, faction: &str, rac
             ("Stamina", delta(before.sta, after.sta)),
             ("Heal", delta(before.heal, after.heal)),
         ];
-        parts.iter()
+        let s = parts.iter()
             .filter(|(_, v)| *v != 0)
-            .map(|(name, v)| if *name == "Crit" {
-                format!("{name} {v:+}%")
-            } else {
-                format!("{}{v:+}", name)
-            })
+            .map(|(name, v)| if *name == "Crit" { format!("{name} {v:+}%") } else { format!("{name}{v:+}") })
             .collect::<Vec<_>>()
-            .join(" · ")
+            .join(" · ");
+        if s.is_empty() { "No derived-stat change".to_string() } else { s }
     }
 
     /// Exact contribution of an equipped item to the character's current derived stats.
     pub(crate) fn equipped_item_impact(&self, slot: usize) -> String {
         let Some(it) = self.gear.get(slot).and_then(|x| x.as_ref()) else { return "No item equipped".to_string(); };
-        let before = self.fighter().stats();
-        let mut gear = self.gear.clone();
-        if it.is_two() {
-            gear[S_MAIN] = None;
-            gear[S_OFF] = None;
-        } else {
-            gear[slot] = None;
-        }
-        let after = self.stats_for_gear(gear);
-        let delta = Self::stat_delta_text(after, before);
-        if delta.is_empty() { "No derived-stat change".to_string() } else { delta }
+        let both = [S_MAIN, S_OFF];
+        let one = [slot];
+        let drop: &[usize] = if it.is_two() { &both } else { &one };
+        Self::stat_delta_text(self.stats_with(drop, None), self.stats())
     }
 
     /// Exact contribution of all equipped gear to the current derived stats.
     pub(crate) fn equipped_gear_impact(&self) -> String {
-        let before = self.stats_for_gear(vec![None; SLOTS.len()]);
-        let after = self.fighter().stats();
-        let delta = Self::stat_delta_text(before, after);
-        if delta.is_empty() { "No derived-stat change".to_string() } else { delta }
+        let naked = derive_stats(self.class, self.spec, self.level, self.talents, &GearAgg::default());
+        Self::stat_delta_text(naked, self.stats())
     }
 
     /// Project the item's exact derived-stat change if the player equips it now.
     pub(crate) fn bag_item_impact(&self, it: &Item) -> String {
         let cands = candidates(it, self.class, self.two_now());
         if cands.is_empty() { return "Not equippable by this class/setup".to_string(); }
-        let pw = |o: &Option<Item>| o.as_ref().map_or(-1i64, |i| item_power(i, self.class, self.spec) as i64);
-        let target = cands.iter().copied().min_by_key(|&slot| pw(&self.gear[slot])).unwrap_or(S_MAIN);
-        let before = self.fighter().stats();
-        let mut gear = self.gear.clone();
-        if it.is_two() {
-            gear[S_MAIN] = None;
-            gear[S_OFF] = None;
-        } else {
-            gear[target] = None;
-        }
-        gear[target] = Some(it.clone());
-        let after = self.stats_for_gear(gear);
-        let delta = Self::stat_delta_text(before, after);
-        if delta.is_empty() { "No derived-stat change".to_string() } else { delta }
+        let target = self.best_slot(&cands);
+        let both = [S_MAIN, S_OFF];
+        let one = [target];
+        let drop: &[usize] = if it.is_two() { &both } else { &one };
+        Self::stat_delta_text(self.stats(), self.stats_with(drop, Some(it)))
     }
 
     pub(crate) fn stash(&mut self, it: Item, msgs: &mut Vec<Msg>) {
@@ -198,9 +190,6 @@ pub(crate) fn new(name: String, guild: String, realm: &Realm, faction: &str, rac
     }
 
     /// Apply the resource cost of performing one action on a quest.
-    /// Quest level is compared with the character level: same-level quests use
-    /// the baseline cost; higher-level quests hurt more, and lower-level quests
-    /// hurt less.
     pub(crate) fn apply_quest_cost(&mut self, q: &Quest, enc: &Encounter, msgs: &mut Vec<Msg>) {
         let (max_hp, max_mana, max_sta) = self.maxes();
         let eff = (q.quest_level + enc.level + 1) / 2;

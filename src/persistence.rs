@@ -1,6 +1,5 @@
 use gtk::glib;
 use std::path::PathBuf;
-use std::collections::HashSet;
 
 use crate::{
     config::{MAX_LEVEL, ZONE_TERR}, data::{classes::*, items::*}, items::make_item, model::*, utils::*,
@@ -17,7 +16,7 @@ pub(crate) fn save_path() -> PathBuf {
 pub(crate) fn migrate(s: &mut Save) {
     let map: [usize; 6] = [0, 1, 2, 6, S_MAIN, 12];
     let expected = zone_bands().len() * ZONE_TERR.len();
-     let legacy = std::mem::take(&mut s.zones);
+    let legacy = std::mem::take(&mut s.zones);
     let mut taken = all_zone_names(&s.heroes);
     taken.extend(legacy.iter().map(|z| z.name.clone()));
     for h in &mut s.heroes {
@@ -77,6 +76,13 @@ pub(crate) fn load() -> Save {
     s
 }
 
+/// Compact JSON, written to a temp file then renamed so a crash never corrupts the save.
 pub(crate) fn persist(s: &Save) {
-    if let Ok(j) = serde_json::to_string_pretty(s) { let _ = std::fs::write(save_path(), j); }
+    let path = save_path();
+    let tmp = path.with_extension("json.tmp");
+    if let Ok(j) = serde_json::to_vec(s) {
+        if std::fs::write(&tmp, j).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+    }
 }

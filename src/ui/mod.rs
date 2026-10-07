@@ -21,18 +21,35 @@ use create::create_screen;
 
 pub(crate) use common::*;
 
+const CSS: &str = "progressbar.hp-bar progress { background: #c0392b; } \
+     progressbar.mana-bar progress { background: #2e86de; } \
+     progressbar.sta-bar progress { background: #d4a017; } \
+     frame.gear-slot { padding: 6px; border-radius: 8px; background: #101722; min-width: 145px; } \
+     frame.gear-slot label { color: #e6edf3; } \
+     frame.gear-empty { border: 2px solid #30363d; } \
+     frame.gear-quality-0 { border: 2px solid #9d9d9d; background: rgba(157,157,157,0.08); } \
+     frame.gear-quality-1 { border: 2px solid #ffffff; background: rgba(255,255,255,0.06); } \
+     frame.gear-quality-2 { border: 2px solid #1eff00; background: rgba(30,255,0,0.08); } \
+     frame.gear-quality-3 { border: 2px solid #0070dd; background: rgba(0,112,221,0.10); } \
+     frame.gear-quality-4 { border: 2px solid #a335ee; background: rgba(163,53,238,0.12); } \
+     frame.gear-quality-5 { border: 2px solid #ff8000; background: rgba(255,128,0,0.12); } \
+     frame.gear-quality-6 { border: 2px solid #00ccff; background: rgba(0,204,255,0.12); }";
+
 pub(crate) struct Ui {
     pub(crate) save: RefCell<Save>,
     pub(crate) active: Cell<Option<usize>>,
     pub(crate) confirm_del: Cell<Option<usize>>,
     pub(crate) realms: Vec<Realm>,
-    pub(crate) zones: Vec<Zone>,
     pub(crate) opps: RefCell<Vec<Fighter>>,
     pub(crate) store: RefCell<Vec<Item>>,
     pub(crate) store_key: Cell<(usize, u32)>,
     pub(crate) honor_stock: RefCell<Vec<Item>>,
     pub(crate) honor_key: Cell<(usize, u32)>,
+    /// Bit per notebook page: set = page content is stale and must be rebuilt when shown.
+    pub(crate) dirty: Cell<u16>,
+    pub(crate) save_pending: Cell<bool>,
     pub(crate) stack: gtk::Stack,
+    pub(crate) nb: gtk::Notebook,
     pub(crate) sel_list: gtk::Box,
     pub(crate) title: gtk::Label, xp_bar: gtk::ProgressBar, stats: gtk::Label,
     pub(crate) hp_bar: gtk::ProgressBar, mana_bar: gtk::ProgressBar, sta_bar: gtk::ProgressBar,
@@ -55,23 +72,9 @@ impl Ui {
         let ho = gtk::Orientation::Horizontal;
         let ve = gtk::Orientation::Vertical;
 
-        // ----- colours for the resource bars
+        // ----- styling
         let css = gtk::CssProvider::new();
-        css.load_from_data(
-            "progressbar.hp-bar progress { background: #c0392b; } \
-             progressbar.mana-bar progress { background: #2e86de; } \
-             progressbar.sta-bar progress { background: #d4a017; } \
-             frame.gear-slot { padding: 6px; border-radius: 8px; background: #101722; min-width: 145px; } \
-             frame.gear-slot label { color: #e6edf3; } \
-             frame.gear-empty { border: 2px solid #30363d; } \
-             frame.gear-quality-0 { border: 2px solid #9d9d9d; background: rgba(157,157,157,0.08); } \
-             frame.gear-quality-1 { border: 2px solid #ffffff; background: rgba(255,255,255,0.06); } \
-             frame.gear-quality-2 { border: 2px solid #1eff00; background: rgba(30,255,0,0.08); } \
-             frame.gear-quality-3 { border: 2px solid #0070dd; background: rgba(0,112,221,0.10); } \
-             frame.gear-quality-4 { border: 2px solid #a335ee; background: rgba(163,53,238,0.12); } \
-             frame.gear-quality-5 { border: 2px solid #ff8000; background: rgba(255,128,0,0.12); } \
-             frame.gear-quality-6 { border: 2px solid #00ccff; background: rgba(0,204,255,0.12); }",
-        );
+        css.load_from_data(CSS);
         if let Some(d) = gtk::gdk::Display::default() {
             gtk::style_context_add_provider_for_display(&d, &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
         }
@@ -142,7 +145,7 @@ impl Ui {
             "Choose KILL (kill X creatures from your current zone — every kill is a line you fill in and mark done or abandon) \
              or GATHER (press ⚔ +1: each attempt may or may not find the item, and zone creatures ambush you while you search). \
              The Goal field controls the required count. \
-             Every step has a chance to drop a health, mana or stamina potion. Quest Lv stays within ±5 of your character level;
+             Every step has a chance to drop a health, mana or stamina potion. Quest Lv stays within ±5 of your character level; \
              higher-level quests consume more HP, mana and stamina when performed.",
         ));
         hint.set_xalign(0.0); hint.set_wrap(true); hint.add_css_class("dim-label");
@@ -242,6 +245,7 @@ impl Ui {
         honor_inner.append(&honor_lbl); honor_inner.append(&honor_hint); honor_inner.append(&honor_list);
         let honor_scroll = gtk::ScrolledWindow::builder().vexpand(true).child(&honor_inner).build();
 
+        // ----- blacksmith tab
         let smith_lbl = gtk::Label::new(None); smith_lbl.set_xalign(0.0); smith_lbl.set_hexpand(true);
         let smith_all = gtk::Button::with_label("🔨 Repair all");
         let smith_hint = gtk::Label::new(Some(
@@ -255,7 +259,6 @@ impl Ui {
         pad(&smith_inner, 10);
         smith_inner.append(&smith_top); smith_inner.append(&smith_hint); smith_inner.append(&smith_list);
         let smith_scroll = gtk::ScrolledWindow::builder().vexpand(true).child(&smith_inner).build();
-
 
         // ----- logs tab
         let log_filter = gtk::DropDown::from_strings(&LOG_FILTERS);
@@ -281,17 +284,18 @@ impl Ui {
         sheet_box.append(&sheet); sheet_box.append(&ab_list);
         let sheet_scroll = gtk::ScrolledWindow::builder().vexpand(true).child(&sheet_box).build();
 
+        // Page order matters: dashboard::refresh_page maps these indices.
         let nb = gtk::Notebook::new();
         nb.set_vexpand(true);
-        nb.append_page(&quests_page, Some(&gtk::Label::new(Some("📜 Quests"))));
-        nb.append_page(&zones_page, Some(&gtk::Label::new(Some("🗺 Zones"))));
-        nb.append_page(&pvp_page, Some(&gtk::Label::new(Some("⚔ Realm PvP"))));
-        nb.append_page(&eq_scroll, Some(&gtk::Label::new(Some("🎒 Equipment"))));
-        nb.append_page(&store_scroll, Some(&gtk::Label::new(Some("🏪 Store"))));
-        nb.append_page(&honor_scroll, Some(&gtk::Label::new(Some("🎖 Honor Store"))));
-        nb.append_page(&smith_scroll, Some(&gtk::Label::new(Some("🔨 Blacksmith"))));
-        nb.append_page(&sheet_scroll, Some(&gtk::Label::new(Some("🧙 Character"))));
-        nb.append_page(&logs_page, Some(&gtk::Label::new(Some("📋 Logs"))));
+        nb.append_page(&quests_page, Some(&gtk::Label::new(Some("📜 Quests"))));      // 0
+        nb.append_page(&zones_page, Some(&gtk::Label::new(Some("🗺 Zones"))));        // 1
+        nb.append_page(&pvp_page, Some(&gtk::Label::new(Some("⚔ Realm PvP"))));      // 2
+        nb.append_page(&eq_scroll, Some(&gtk::Label::new(Some("🎒 Equipment"))));     // 3
+        nb.append_page(&store_scroll, Some(&gtk::Label::new(Some("🏪 Store"))));      // 4
+        nb.append_page(&honor_scroll, Some(&gtk::Label::new(Some("🎖 Honor Store")))); // 5
+        nb.append_page(&smith_scroll, Some(&gtk::Label::new(Some("🔨 Blacksmith")))); // 6
+        nb.append_page(&sheet_scroll, Some(&gtk::Label::new(Some("🧙 Character"))));  // 7
+        nb.append_page(&logs_page, Some(&gtk::Label::new(Some("📋 Logs"))));          // 8
 
         let game = gtk::Box::new(ve, 10);
         pad(&game, 12);
@@ -306,14 +310,14 @@ impl Ui {
         win.set_child(Some(&stack));
 
         let save = load();
-        let zones = save.zones.clone();
 
         let ui = Rc::new(Ui {
             save: RefCell::new(save), active: Cell::new(None), confirm_del: Cell::new(None),
-            realms: make_realms(), zones, opps: RefCell::new(vec![]),
+            realms: make_realms(), opps: RefCell::new(vec![]),
             store: RefCell::new(vec![]), store_key: Cell::new((usize::MAX, 0)),
             honor_stock: RefCell::new(vec![]), honor_key: Cell::new((usize::MAX, 0)),
-            stack, sel_list, title, xp_bar, stats, hp_bar, mana_bar, sta_bar, pot_btn,
+            dirty: Cell::new(u16::MAX), save_pending: Cell::new(false),
+            stack, nb, sel_list, title, xp_bar, stats, hp_bar, mana_bar, sta_bar, pot_btn,
             giver, entry, goal, qkind, quest_level, tier, cat, chain, qlist, status,
             zsearch, zkind, zcount, zlist, pvp_head, pvp_faction, pvp_result, pvp_list, log_filter, log_view, sheet, ab_list,
             eq_sum, eq_paperdoll, eq_list, bag_head, bag_list, store_gold, store_pots, store_list,
@@ -323,7 +327,13 @@ impl Ui {
         { let u = ui.clone(); sel_new.connect_clicked(move |_| u.show_create()); }
         { let u = ui.clone(); add_btn.connect_clicked(move |_| u.add_quest()); }
         { let u = ui.clone(); ui.entry.connect_activate(move |_| u.add_quest()); }
-        { let u = ui.clone(); save_btn.connect_clicked(move |_| u.finish(vec![m("System", "💾 Character saved.")])); }
+        {
+            let u = ui.clone();
+            save_btn.connect_clicked(move |_| {
+                u.finish(vec![m("System", "💾 Character saved.")]);
+                persist(&u.save.borrow());
+            });
+        }
         { let u = ui.clone(); switch_btn.connect_clicked(move |_| u.show_select()); }
         { let u = ui.clone(); pvp_refresh.connect_clicked(move |_| u.new_opponents()); }
         { let u = ui.clone(); let faction_filter = ui.pvp_faction.clone(); faction_filter.connect_selected_notify(move |_| u.new_opponents()); }
@@ -334,9 +344,18 @@ impl Ui {
         { let u = ui.clone(); ui.zkind.connect_selected_notify(move |_| u.refresh_zones()); }
         { let u = ui.clone(); ui.log_filter.connect_selected_notify(move |_| u.refresh_logs()); }
         { let u = ui.clone(); ui.smith_all.connect_clicked(move |_| u.repair_all()); }
+        { let u = ui.clone(); ui.nb.connect_switch_page(move |_, _, p| u.refresh_page(p)); }
         for (k, b) in ui.pot_btn.iter().enumerate() {
             let u = ui.clone();
             b.connect_clicked(move |_| u.drink(k));
+        }
+        // flush any debounced save when the window closes
+        {
+            let u = ui.clone();
+            win.connect_close_request(move |_| {
+                persist(&u.save.borrow());
+                glib::Propagation::Proceed
+            });
         }
 
         win.present();

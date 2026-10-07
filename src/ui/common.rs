@@ -1,4 +1,3 @@
-
 use gtk::prelude::*;
 
 pub(crate) fn pad(w: &impl IsA<gtk::Widget>, n: i32) {
@@ -11,6 +10,14 @@ pub(crate) fn labeled(text: &str, w: &impl IsA<gtk::Widget>) -> gtk::Box {
     l.add_css_class("dim-label");
     b.append(&l); b.append(w);
     b
+}
+/// Remove every child of a box.
+pub(crate) fn clear(b: &gtk::Box) {
+    while let Some(c) = b.first_child() { b.remove(&c); }
+}
+/// The dropdown's current value from a parallel slice (index clamped).
+pub(crate) fn sel<T: Copy>(dd: &gtk::DropDown, a: &[T]) -> T {
+    a[(dd.selected() as usize).min(a.len() - 1)]
 }
 pub(crate) fn set_options(dd: &gtk::DropDown, items: &[String]) {
     let same = dd.model().and_then(|mo| mo.downcast::<gtk::StringList>().ok()).map_or(false, |sl| {
@@ -35,5 +42,3 @@ pub(crate) fn set_bar(b: &gtk::ProgressBar, label: &str, cur: u32, max: u32) {
     b.set_fraction((cur as f64 / max.max(1) as f64).min(1.0));
     b.set_text(Some(&format!("{label} {cur} / {max}")));
 }
-
-

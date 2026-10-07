@@ -1,4 +1,3 @@
-
 mod combat;
 mod config;
 mod data;
@@ -7,6 +6,7 @@ mod items;
 mod model;
 mod persistence;
 mod quests;
+mod stats;
 mod utils;
 mod world;
 mod ui;
@@ -21,4 +21,3 @@ fn main() -> glib::ExitCode {
     });
     app.run()
 }
-
