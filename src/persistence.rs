@@ -80,9 +80,9 @@ pub(crate) fn load() -> Save {
 pub(crate) fn persist(s: &Save) {
     let path = save_path();
     let tmp = path.with_extension("json.tmp");
-    if let Ok(j) = serde_json::to_vec(s) {
-        if std::fs::write(&tmp, j).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
-        }
+    if let Ok(j) = serde_json::to_vec(s)
+        && std::fs::write(&tmp, j).is_ok()
+    {
+        let _ = std::fs::rename(&tmp, &path);
     }
 }

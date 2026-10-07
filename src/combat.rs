@@ -83,9 +83,9 @@ impl Fighter {
         }
 
         out.push_str("\n<b>How raw gear stats convert to derived stats</b>\n");
-        for i in 0..STAT_NAMES.len() {
-            if tot[i] > 0 {
-                out.push_str(&format!("  {}\n", stat_effect(self.class, self.spec, i, tot[i])));
+        for (i, &v) in tot.iter().enumerate() {
+            if v > 0 {
+                out.push_str(&format!("  {}\n", stat_effect(self.class, self.spec, i, v)));
             }
         }
 

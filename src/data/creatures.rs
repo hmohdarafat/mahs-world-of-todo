@@ -72,16 +72,16 @@ pub(crate) const HARD: [&[&str]; 11] = [
 
 pub(crate) fn matchup(class: &str, t: usize) -> Matchup {
     let t = t.min(CTYPES.len() - 1);
-    if t == 9 || EASY[t].iter().any(|c| *c == class) { Matchup::Easy }
-    else if HARD[t].iter().any(|c| *c == class) { Matchup::Hard }
+    if t == 9 || EASY[t].contains(&class) { Matchup::Easy }
+    else if HARD[t].contains(&class) { Matchup::Hard }
     else { Matchup::Average }
 }
 
 pub(crate) fn matchup_markup(class: &str) -> String {
     let mut g: [Vec<&str>; 3] = [vec![], vec![], vec![]];
-    for t in 0..CTYPES.len() {
+    for (t, name) in CTYPES.iter().enumerate() {
         let i = match matchup(class, t) { Matchup::Easy => 0, Matchup::Average => 1, Matchup::Hard => 2 };
-        g[i].push(CTYPES[t]);
+        g[i].push(*name);
     }
     let line = |m: Matchup, v: &Vec<&str>| format!(
         "<span foreground='{}'><b>{}</b>: {}</span>", m.color(), m.label(),

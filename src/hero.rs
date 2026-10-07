@@ -29,7 +29,7 @@ impl Hero {
     pub(crate) fn zone_ref(&self) -> Option<&Zone> { self.zone_named(&self.zone) }
 
     pub(crate) fn two_now(&self) -> bool {
-        self.gear.get(S_MAIN).and_then(|o| o.as_ref()).map_or(false, |i| i.is_two())
+        self.gear.get(S_MAIN).and_then(|o| o.as_ref()).is_some_and(|i| i.is_two())
     }
 
     pub(crate) fn fighter(&self) -> Fighter {
@@ -111,9 +111,7 @@ impl Hero {
         }
         let mut out = vec![];
         if let Some(o) = self.gear[target].take() { out.push(o); }
-        if two {
-            if let Some(o) = self.gear[S_OFF].take() { out.push(o); }
-        }
+        if two && let Some(o) = self.gear[S_OFF].take() { out.push(o); }
         self.gear[target] = Some(it);
         Ok(out)
     }
@@ -122,7 +120,7 @@ impl Hero {
         let cands = candidates(it, self.class, self.two_now());
         if cands.is_empty() { return false; }
         let p = item_power(it, self.class, self.spec);
-        cands.iter().any(|&s| self.gear[s].as_ref().map_or(true, |o| item_power(o, self.class, self.spec) < p))
+        cands.iter().any(|&s| self.gear[s].as_ref().is_none_or(|o| item_power(o, self.class, self.spec) < p))
     }
 
     fn stat_delta_text(before: Stats, after: Stats) -> String {
@@ -192,7 +190,7 @@ impl Hero {
     /// Apply the resource cost of performing one action on a quest.
     pub(crate) fn apply_quest_cost(&mut self, q: &Quest, enc: &Encounter, msgs: &mut Vec<Msg>) {
         let (max_hp, max_mana, max_sta) = self.maxes();
-        let eff = (q.quest_level + enc.level + 1) / 2;
+        let eff = (q.quest_level + enc.level).div_ceil(2);
         let diff = eff as i32 - self.level as i32;
         let mut pressure = (100 + diff * 15).clamp(40, 175) as u32;
         let mu = matchup(CLASSES[self.class].name, enc.ctype);
@@ -305,7 +303,7 @@ impl Hero {
         for _ in 0..drops {
             self.loot_one(q, &mut msgs);
         }
-        if self.done % 20 == 0 {
+        if self.done.is_multiple_of(20) {
             let it = drop_item(self.class, self.spec, self.level, Q_HEIRLOOM);
             msgs.push(m("Loot", "🏺 Heirloom cache unlocked (every 20 quests)!"));
             self.receive(it, &mut msgs);

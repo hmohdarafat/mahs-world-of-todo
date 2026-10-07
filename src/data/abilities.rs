@@ -240,7 +240,7 @@ pub(crate) const AB_WARRIOR: &[Ab] = &[
     ab(19, "Rallying Cry", Absorb, 20, 12, Free, 0, ALL),
 ];
 
-pub(crate) fn spec_ok(a: &Ab, spec: &str) -> bool { a.sp.is_empty() || a.sp.iter().any(|s| *s == spec) }
+pub(crate) fn spec_ok(a: &Ab, spec: &str) -> bool { a.sp.is_empty() || a.sp.contains(&spec) }
 
 /// Abilities this class/spec knows at `level`.
 pub(crate) fn known(class: usize, spec: usize, level: u32) -> Vec<&'static Ab> {

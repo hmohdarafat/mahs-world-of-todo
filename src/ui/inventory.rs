@@ -199,10 +199,10 @@ impl Ui {
         self.store_gold.set_text(&format!("💰 You have {} gold · bag {}/{}", h.gold, h.bag.len(), BAG_MAX));
 
         let pp = potion_price(h.level);
-        for k in 0..3 {
+        for (k, pot) in POT.iter().enumerate() {
             let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
             let lbl = gtk::Label::new(Some(&format!(
-                "{} {} — restores {POT_PCT}% · you have {}", POT[k].1, POT[k].0, h.pots[k])));
+                "{} {} — restores {POT_PCT}% · you have {}", pot.1, pot.0, h.pots[k])));
             lbl.set_xalign(0.0); lbl.set_hexpand(true);
             let b = gtk::Button::with_label(&format!("Buy {pp}g"));
             b.set_sensitive(h.gold >= pp);

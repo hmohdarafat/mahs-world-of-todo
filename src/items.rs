@@ -403,10 +403,10 @@ pub(crate) fn npc_quality(level: u32) -> usize {
 
 pub(crate) fn build_gear(class: usize, spec: usize, level: u32) -> Vec<Option<Item>> {
     let mut g: Vec<Option<Item>> = vec![None; SLOTS.len()];
-    for slot in 0..S_MAIN {
+    for (slot, entry) in g.iter_mut().enumerate().take(S_MAIN) {
         if rnd(100) < 90 {
             let cat = match slot { 11 => 10, 13 => 12, s => s };
-            g[slot] = make_item(class, spec, level, cat, npc_quality(level));
+            *entry = make_item(class, spec, level, cat, npc_quality(level));
         }
     }
     if let Some(mh) = make_item(class, spec, level, S_MAIN, npc_quality(level)) {

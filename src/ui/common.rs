@@ -20,10 +20,10 @@ pub(crate) fn sel<T: Copy>(dd: &gtk::DropDown, a: &[T]) -> T {
     a[(dd.selected() as usize).min(a.len() - 1)]
 }
 pub(crate) fn set_options(dd: &gtk::DropDown, items: &[String]) {
-    let same = dd.model().and_then(|mo| mo.downcast::<gtk::StringList>().ok()).map_or(false, |sl| {
+    let same = dd.model().and_then(|mo| mo.downcast::<gtk::StringList>().ok()).is_some_and(|sl| {
         sl.n_items() as usize == items.len()
             && items.iter().enumerate()
-                .all(|(i, s)| sl.string(i as u32).map_or(false, |g| g.as_str() == s.as_str()))
+                .all(|(i, s)| sl.string(i as u32).is_some_and(|g| g.as_str() == s.as_str()))
     });
     if same { return; }
     let sel = dd.selected();

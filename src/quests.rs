@@ -5,7 +5,6 @@ impl Tier {
     pub(crate) fn name(self) -> &'static str { ["Normal", "Elite", "Dungeon", "Raid", "World Boss"][self as usize] }
     pub(crate) fn unlock(self) -> u32 { [1, 5, 10, 20, 40][self as usize] }
     pub(crate) fn mult(self) -> u32 { [1, 2, 4, 8, 16][self as usize] }
-    pub(crate) fn loot(self) -> u32 { [25, 50, 100, 100, 100][self as usize] }
 }
 
 /// Hero level ±5, additionally limited to the zone's level range.

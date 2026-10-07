@@ -21,11 +21,11 @@ impl Ui {
     }
 
     pub(crate) fn finish(self: &Rc<Self>, msgs: Vec<Msg>) {
-        if let Some(a) = self.active.get() {
-            if let Some(h) = self.save.borrow_mut().heroes.get_mut(a) {
-                h.clamp_res();
-                h.add_log(msgs);
-            }
+        if let Some(a) = self.active.get()
+            && let Some(h) = self.save.borrow_mut().heroes.get_mut(a)
+        {
+            h.clamp_res();
+            h.add_log(msgs);
         }
         self.schedule_save();
         self.refresh();
@@ -42,8 +42,10 @@ impl Ui {
     }
 
     pub(crate) fn clear_logs(self: &Rc<Self>) {
-        if let Some(a) = self.active.get() {
-            if let Some(h) = self.save.borrow_mut().heroes.get_mut(a) { h.log.clear(); }
+        if let Some(a) = self.active.get()
+            && let Some(h) = self.save.borrow_mut().heroes.get_mut(a)
+        {
+            h.log.clear();
         }
         self.finish(vec![m("System", "🧹 Logs cleared.")]);
     }
@@ -94,11 +96,11 @@ impl Ui {
         set_bar(&self.hp_bar, "❤ HP", h.hp, st.hp);
         set_bar(&self.mana_bar, "🔷 Mana", h.mana, st.mana);
         set_bar(&self.sta_bar, "⚡ Stamina", h.sta, st.sta);
-        for k in 0..3 {
-            let short = POT[k].0.split(' ').next().unwrap_or("");
-            self.pot_btn[k].set_label(&format!("{} {} ×{}", POT[k].1, short, h.pots[k]));
+        for (k, pot) in POT.iter().enumerate() {
+            let short = pot.0.split(' ').next().unwrap_or("");
+            self.pot_btn[k].set_label(&format!("{} {} ×{}", pot.1, short, h.pots[k]));
             self.pot_btn[k].set_sensitive(h.pots[k] > 0);
-            self.pot_btn[k].set_tooltip_text(Some(&format!("Drink a {}: restores {POT_PCT}% of the bar", POT[k].0)));
+            self.pot_btn[k].set_tooltip_text(Some(&format!("Drink a {}: restores {POT_PCT}% of the bar", pot.0)));
         }
         self.stats.set_text(&format!("💰 {} gold   ✨ Talents: {}   🎖 Honor: {}", h.gold, h.talents, h.honor));
 
@@ -127,12 +129,11 @@ impl Ui {
         let (quest_min, quest_max) = quest_level_bounds(h.level, zref);
         let previous_level = self.quest_level.model()
             .and_then(|m| m.downcast::<gtk::StringList>().ok())
-            .and_then(|sl| sl.string(self.quest_level.selected()).map(|v| v.as_str().trim_start_matches("Lv ").parse::<u32>().ok()).flatten())
+            .and_then(|sl| sl.string(self.quest_level.selected()).and_then(|v| v.as_str().trim_start_matches("Lv ").parse::<u32>().ok()))
             .unwrap_or(h.level);
         let qlv: Vec<String> = (quest_min..=quest_max).map(|lv| format!("Lv {lv}")).collect();
         set_options(&self.quest_level, &qlv);
         let keep_level = previous_level.clamp(quest_min, quest_max);
-        self.quest_level.set_selected((keep_level - quest_min) as u32);
 
         let tl: Vec<String> = Tier::ALL.iter().map(|t| {
             if t.unlock() <= h.level { format!("{} · x{} rewards", t.name(), t.mult()) }
